@@ -32,7 +32,8 @@ import { loadPresetIntoConfiguration } from "@/shared/lib/defense-configuration"
 import { defenseAssetLibrary } from "@/shared/config/defense-asset-library";
 import { fetchAssetLibrary, type FetchAssetLibraryOptions } from "@/modules/drone-defense/infra/asset-library-api";
 import { fetchEnterprises, type FetchEnterprisesOptions } from "@/modules/drone-defense/infra/enterprise-api";
-import { FORTIS_CONFIGURATION_STORAGE_KEY } from "@/shared/lib/use-defense-configuration-store";
+import { businessContent, type SaveAttempt } from "./project-save-state";
+import { writeProjectDraft, removeProjectDraft, type ProjectDraft } from "./project-draft-storage";
 import type {
   Coordinates,
   DefenseAsset,
@@ -56,10 +57,23 @@ type DefenseProjectState = {
   hydrated: boolean;
   runtimeMode: "workspace" | "demo";
   syncStatus: "saved" | "dirty" | "unverified";
+  businessRevision: number;
+  savedProject: DefenseProject | null;
+  saveAttempt: SaveAttempt | null;
+  draftStorageError: string | null;
+  localDraftSaved: boolean;
+  acceptServerProject: (project: DefenseProject) => void;
+  recordSavedProject: (sent: DefenseProject, server: DefenseProject) => void;
+  restoreVerifiedDraft: (record: ProjectDraft) => void;
+  localDraftsEnabled: boolean;
+  setLocalDraftsEnabled: (enabled: boolean) => void;
   setRuntimeMode: (mode: "workspace" | "demo") => void;
   budgetApplied: boolean;
   assetLibraryLoading: boolean;
   assetLibraryError: string | null;
+  assetLibraryPreview: { baseProject: DefenseProject; assets: DefenseAsset[]; generation: number } | null;
+  applyAssetLibraryPreview: () => boolean;
+  discardAssetLibraryPreview: () => void;
   protectedObjects: ProtectedObjectOption[];
   protectedObjectsLoading: boolean;
   protectedObjectsError: string | null;
@@ -121,46 +135,18 @@ type DefenseProjectState = {
   importProjectJson: (raw: string) => void;
 };
 
-function canUseLocalStorage() {
-  return typeof globalThis.localStorage !== "undefined";
-}
-
+// Legacy key is retained only as an identifier for explicitly exported old data; never read automatically.
 export function projectStorageKey(userId: string) { return `${FORTIS_DEFENSE_PROJECT_STORAGE_KEY}:user:${encodeURIComponent(userId)}`; }
 
-function storageKey() {
- const { runtimeMode, identityId } = useDefenseProjectStore.getState();
- return runtimeMode === "demo" ? `${FORTIS_DEFENSE_PROJECT_STORAGE_KEY}:demo` : identityId ? projectStorageKey(identityId) : null;
-}
-
 function persist(project: DefenseProject) {
-  const key = storageKey();
-  if (!canUseLocalStorage() || !key) return;
-  globalThis.localStorage.setItem(key, exportDefenseProjectJson(project));
-}
-
-function readProject(): DefenseProject | null {
-  const key = storageKey();
-  if (!canUseLocalStorage() || !key) return null;
-  const raw = globalThis.localStorage.getItem(key);
-  if (!raw) return null;
-  try {
-    return importDefenseProjectJson(raw);
-  } catch {
-    return null;
-  }
-}
-
-function readLegacyConfigurationProject(): DefenseProject | null {
-  if (!canUseLocalStorage()) return null;
-  const raw = globalThis.localStorage.getItem(FORTIS_CONFIGURATION_STORAGE_KEY);
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (!parsed?.selectedItems) return null;
-    return legacySelectedConfigurationToProject(parsed);
-  } catch {
-    return null;
-  }
+  const state = useDefenseProjectStore.getState();
+  const userId = state.runtimeMode === "demo" ? "demo" : state.identityId;
+  if (!userId) return;
+  const result = writeProjectDraft({ schemaVersion: 1, userId, enterpriseId: project.enterpriseId ?? project.baseObject.id,
+    projectId: project.projectId, draft: project, savedProject: state.savedProject, businessRevision: state.businessRevision,
+    savedAt: new Date().toISOString(), ...(state.saveAttempt ? { attempt: state.saveAttempt } : {}),
+  }, state.localDraftsEnabled);
+  useDefenseProjectStore.setState({ localDraftSaved: result.ok && result.value, draftStorageError: result.ok ? null : result.error });
 }
 
 function syncSelection(project: DefenseProject) {
@@ -203,8 +189,13 @@ function mergeProtectedObjectOptions(
 }
 
 function applyProject(project: DefenseProject, set: (state: Partial<DefenseProjectState>) => void) {
+  const state = useDefenseProjectStore.getState();
+  const savedProject = state.savedProject?.projectId === project.projectId ? state.savedProject : null;
+  const changed = businessContent(project) !== businessContent(state.project);
+  set({ project, savedProject, businessRevision: state.businessRevision + (changed ? 1 : 0), hydrated: true,
+    syncStatus: state.accessError ? "unverified" : savedProject && businessContent(project) === businessContent(savedProject) ? "saved" : "dirty",
+    budgetApplied: false, ...syncSelection(project) });
   persist(project);
-  set({ project, hydrated: true, syncStatus: useDefenseProjectStore.getState().accessError ? "unverified" : "dirty", budgetApplied: false, ...syncSelection(project) });
 }
 
 export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => {
@@ -216,6 +207,27 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     hydrated: false,
     runtimeMode: "workspace",
     syncStatus: "unverified",
+    businessRevision: 0,
+    savedProject: null,
+    saveAttempt: null,
+    draftStorageError: null,
+    localDraftSaved: false,
+    acceptServerProject: (project) => set({ project, savedProject: project, saveAttempt: null, businessRevision: 0,
+      hydrated: true, syncStatus: "saved", accessError: null, localDraftSaved: false, draftStorageError: null, ...syncSelection(project) }),
+    recordSavedProject: (sent, server) => {
+      const latest = get().project;
+      const project = { ...latest, projectId: server.projectId, enterpriseId: server.enterpriseId, version: server.version, updatedAt: server.updatedAt, source: "backend" as const };
+      const baseline = { ...sent, projectId: server.projectId, enterpriseId: server.enterpriseId, version: server.version, updatedAt: server.updatedAt, source: "backend" as const };
+      set({ project, savedProject: baseline, saveAttempt: null, syncStatus: businessContent(project) === businessContent(baseline) ? "saved" : "dirty", hydrated: true, ...syncSelection(project) });
+      if (sent.projectId !== project.projectId && get().identityId) removeProjectDraft({ userId: get().identityId!, enterpriseId: sent.enterpriseId ?? sent.baseObject.id, projectId: sent.projectId }, get().localDraftsEnabled);
+      persist(project);
+    },
+    restoreVerifiedDraft: (record) => {
+      set({ project: record.draft, savedProject: record.savedProject, saveAttempt: record.attempt ?? null,
+        businessRevision: record.businessRevision, hydrated: true, syncStatus: "dirty", localDraftSaved: true, draftStorageError: null, accessError: null, ...syncSelection(record.draft) });
+    },
+    localDraftsEnabled: false,
+    setLocalDraftsEnabled: (localDraftsEnabled) => set({ localDraftsEnabled }),
     setRuntimeMode: (runtimeMode) => {
       set({ runtimeMode });
       if (runtimeMode === "demo" && !get().hydrated && get().project.source !== "backend") {
@@ -225,6 +237,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     budgetApplied: false,
     assetLibraryLoading: false,
     assetLibraryError: null,
+    assetLibraryPreview: null,
     protectedObjects: [],
     protectedObjectsLoading: false,
     protectedObjectsError: null,
@@ -410,8 +423,8 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         activeLayerId: layerId,
         layers: get().project.layers.map((layer) => ({ ...layer, isActive: layer.id === layerId })),
       };
-      persist(project);
       set({ project, ...syncSelection(project) });
+      persist(project);
     },
     setBaseObjectCenter: (center) => {
       const current = get().project.baseObject.center;
@@ -431,9 +444,12 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       });
     },
     selectAsset: (assetId) => {
-      const project = { ...get().project, selectedAssetId: assetId, mode: "place-object" as const };
+      const before = get().project;
+      const project = { ...before, selectedAssetId: assetId, mode: "place-object" as const };
+      const preview = get().assetLibraryPreview;
+      set({ project, ...syncSelection(project), assetLibraryPreview: preview?.baseProject === before
+        ? {...preview, baseProject: project} : preview });
       persist(project);
-      set({ project, ...syncSelection(project) });
     },
     selectObject: (objectId) => {
       const object = objectId ? get().project.placedObjects.find((item) => item.id === objectId) : null;
@@ -444,8 +460,8 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         activeLayerId: object ? object.layerId : get().project.activeLayerId,
         layers: get().project.layers.map((layer) => ({ ...layer, isActive: object ? layer.id === object.layerId : layer.id === get().project.activeLayerId })),
       };
-      persist(project);
       set({ project, ...syncSelection(project) });
+      persist(project);
     },
     setAssetQuantity: (assetId, quantity) => applyProject(setAssetQuantityInProject(get().project, assetId, quantity), set),
     placeObject: (assetId, layerId, coordinates, patch) => {
@@ -503,13 +519,25 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         if (generation !== sessionGeneration()) return;
         // A refresh for a previous project must not replace the newly opened project.
         if (get().project !== startingProject) { set({ assetLibraryLoading: false }); return; }
-        const project = { ...startingProject, assetLibrary: assets };
-        set({ project, assetLibraryLoading: false, assetLibraryError: null, ...syncSelection(project) });
+        const merged = new Map(startingProject.assetLibrary.map(asset => [asset.id,asset]));
+        for (const asset of assets) merged.set(asset.id,asset);
+        const nextAssets = [...merged.values()];
+        const changed = JSON.stringify(nextAssets) !== JSON.stringify(startingProject.assetLibrary);
+        set({ assetLibraryLoading: false, assetLibraryError: null, assetLibraryPreview: changed ? {baseProject: startingProject, assets: nextAssets, generation} : null });
+        if (startingProject.source !== "backend" && startingProject.assetLibrary.length === 0 && startingProject.placedObjects.length === 0 && changed) get().applyAssetLibraryPreview();
       } catch (error) {
         if (generation !== sessionGeneration()) return;
         set({ assetLibraryLoading: false, assetLibraryError: error instanceof Error ? error.message : "Не удалось загрузить библиотеку с сервера." });
       }
     },
+    applyAssetLibraryPreview: () => {
+      const preview = get().assetLibraryPreview;
+      set({assetLibraryPreview: null});
+      if (!preview || preview.baseProject !== get().project || preview.generation !== sessionGeneration() || get().accessError) return false;
+      applyProject({...preview.baseProject,assetLibrary:preview.assets,updatedAt:new Date().toISOString()},set);
+      return true;
+    },
+    discardAssetLibraryPreview: () => set({assetLibraryPreview:null}),
     refreshProtectedObjects: async (options = {}) => {
       const generation = sessionGeneration();
       const { loader, ...query } = options;
@@ -525,18 +553,13 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       }
     },
     upsertAssetInLibrary: (asset) => {
-      const current = get().project.assetLibrary;
-      const exists = current.some((item) => item.id === asset.id);
-      const project = {
-        ...get().project,
-        assetLibrary: exists
-          ? current.map((item) => (item.id === asset.id ? asset : item))
-          : [...current, asset],
-        selectedAssetId: asset.id,
-        updatedAt: new Date().toISOString(),
-      };
-      applyProject(project, set);
-      set({ assetLibraryError: null });
+      const baseProject = get().project;
+      const preview = get().assetLibraryPreview;
+      const pendingAssets = preview?.baseProject === baseProject && preview.generation === sessionGeneration()
+        ? preview.assets : baseProject.assetLibrary;
+      const assets = new Map(pendingAssets.map(item=>[item.id,item]));
+      assets.set(asset.id,asset);
+      set({assetLibraryPreview:{baseProject,assets:[...assets.values()],generation:sessionGeneration()},assetLibraryError:null});
     },
     removeAssetFromLibrary: (assetId) => {
       if (get().project.placedObjects.some((object) => object.assetId === assetId)) {
@@ -558,9 +581,8 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     },
     clearProject: () => {
       const project = get().runtimeMode === "demo" ? createDefaultDefenseProject() : { ...initialProject, updatedAt: new Date().toISOString() };
-      persist(project);
       set({
-        project,
+        project, savedProject: null, saveAttempt: null, businessRevision: 0, syncStatus: "dirty",
         hydrated: true,
         budgetApplied: false,
         assetLibraryError: null,
@@ -571,19 +593,8 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     },
     saveProjectToLocalStorage: () => persist(get().project),
     restoreProjectFromLocalStorage: () => {
-      if (get().hydrated) return;
-      // Demo uses its own initial data; a workspace recovery never changes the server-selected mode.
-      const restored = get().runtimeMode === "workspace" ? readProject() : readProject() ?? readLegacyConfigurationProject();
-      const project = restored ?? get().project;
-      set({
-        project,
-        syncStatus: "unverified",
-        hydrated: true,
-        budgetApplied: false,
-        protectedObjects: mergeProtectedObjectOptions(project.baseObject, [], get().protectedObjects),
-        protectedObjectsError: null,
-        ...syncSelection(project),
-      });
+      // Recovery is offered explicitly by the variants UI after fresh resource authorization.
+      if (!get().hydrated) set({ hydrated: true });
     },
     exportProjectJson: () => exportDefenseProjectJson(get().project),
     importProjectJson: (raw) => {

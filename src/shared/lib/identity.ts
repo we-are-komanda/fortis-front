@@ -7,7 +7,7 @@ import { useDefenseConfigurationStore as configuration } from "./use-defense-con
 // A generation change invalidates pending requests as well as every active customer store.
 useSessionStore.subscribe((next, previous) => {
  if (next.generation === previous.generation) return;
- projects.setState({ ...projects.getInitialState(), identityId: next.userId }, true);
+ projects.setState({ ...projects.getInitialState(), identityId: next.userId, localDraftsEnabled: projects.getState().localDraftsEnabled }, true);
  variants.setState(variants.getInitialState(), true);
  studio.setState(studio.getInitialState(), true);
  configuration.setState(configuration.getInitialState(), true);

@@ -1,5 +1,8 @@
 "use client";
 
+import { formatMinorRub } from "@/shared/lib/cost-projection";
+
+import { useProjectCost } from "@/modules/defense-calculator/domain/use-project-cost";
 import { useRuntimeMode } from "@/shared/ui/runtime-provider";
 import { shouldLoadBackendProject, useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { useSearchParams } from "next/navigation";
@@ -77,8 +80,8 @@ function protectedObjectToFacility(object: ProtectedObjectOption) {
   } as const;
 }
 
-function formatLayerCost(totalMln: number) {
-  return `${totalMln.toLocaleString("ru-RU", { maximumFractionDigits: 1 })} млн ₽`;
+function formatLayerCost(totalMinor: string | null) {
+  return formatMinorRub(totalMinor);
 }
 
 function formatObjectCountLabel(count: number) {
@@ -89,8 +92,8 @@ function formatObjectCountLabel(count: number) {
   return `${count} объектов`;
 }
 
-function formatLayerObjectMeta(objectCount: number, totalMln: number) {
-  return `${formatObjectCountLabel(objectCount)} · ${formatLayerCost(totalMln)}`;
+function formatLayerObjectMeta(objectCount: number, totalMinor: string | null) {
+  return `${formatObjectCountLabel(objectCount)} · ${formatLayerCost(totalMinor)}`;
 }
 
 function splitLayerTitle(code: string, name: string) {
@@ -199,6 +202,7 @@ export function DroneDefensePrototype() {
     assetLibraryLoading,
     assetLibraryError,
     refreshAssetLibrary,
+    assetLibraryPreview, applyAssetLibraryPreview, discardAssetLibraryPreview,
     protectedObjects,
     refreshProtectedObjects,
     upsertAssetInLibrary,
@@ -268,7 +272,8 @@ export function DroneDefensePrototype() {
     () => [...project.layers].sort((a, b) => a.order - b.order),
     [project.layers],
   );
-  const layerSummaries = useMemo(() => calculateLayerSummaries(project), [project]);
+  const financial = useProjectCost(project,syncStatus,runtimeMode);
+  const layerSummaries = useMemo(() => calculateLayerSummaries(project, financial.cost ?? null), [project,financial.cost]);
   const requestedView = searchParams.get("view");
   const activeView = requestedView === "scenario-modeling" || requestedView === "3d" ? "drilldown" : view;
   const assetCatalogItems = useMemo(
@@ -401,6 +406,7 @@ export function DroneDefensePrototype() {
     () => project.placedObjects.find((object) => object.id === selectedObjectId) ?? null,
     [project.placedObjects, selectedObjectId],
   );
+  const costLines = financial.cost?.lines ?? [];
   const selectedPlacedAsset = useMemo(
     () => project.assetLibrary.find((asset) => asset.id === selectedPlacedObject?.assetId) ?? null,
     [project.assetLibrary, selectedPlacedObject?.assetId],
@@ -841,10 +847,12 @@ export function DroneDefensePrototype() {
   });
 
   return (
-    <div className="flex h-full min-h-0 flex-col lg:flex-row">
+    <div className="flex h-full min-h-0 flex-col">
       {(variantError || protectedObjectsError) && <div role="alert">{variantError ?? protectedObjectsError}</div>}
       {syncStatus === "unverified" && <div role="status">Локальный черновик — серверное состояние не подтверждено.</div>}
+      {financial.error ? <div role="alert" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm">{financial.error} {financial.saved && <button type="button" className="min-h-11 px-3 underline" onClick={financial.retry}>Повторить расчёт</button>}</div> : <div role="status" className="border-b border-slate-200 bg-white px-4 py-1 text-xs">{financial.blocked ? "Смета ожидает проверки доступа" : !financial.cost ? "Смета загружается" : financial.saved ? `Смета сохранённой версии ${project.version}` : "Черновая смета — изменения не сохранены"}</div>}
 
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       {activeView === "gis" ? (
         <section
           data-sidebar-state={isCatalogTrayOpen ? "open" : "closed"}
@@ -896,6 +904,10 @@ export function DroneDefensePrototype() {
             </div>
             <AssetLibraryManager
               assets={project.assetLibrary}
+              enterpriseId={project.enterpriseId}
+              previewAssets={assetLibraryPreview?.baseProject === project ? assetLibraryPreview.assets : null}
+              onApplyPreview={applyAssetLibraryPreview}
+              onDiscardPreview={discardAssetLibraryPreview}
               placedObjects={project.placedObjects}
               selectedAssetId={activeToolId ?? selectedPlacedObject?.assetId}
               loading={assetLibraryLoading}
@@ -907,7 +919,6 @@ export function DroneDefensePrototype() {
               }}
               onAssetSaved={(asset) => {
                 upsertAssetInLibrary(asset);
-                setActiveToolId(asset.id);
               }}
               onAssetDeleted={(assetId) => {
                 const result = removeAssetFromLibrary(assetId);
@@ -981,6 +992,7 @@ export function DroneDefensePrototype() {
                 <EchelonObjectsList
                   layerId={activeEchelonObjectsLayer.id as DefenseLayerId}
                   placements={projectCatalogPlacements}
+                  costLines={costLines}
                   catalog={catalog}
                   layers={allProjectMapLayers}
                   hiddenPlacementIds={hiddenPlacementIds}
@@ -1073,6 +1085,7 @@ export function DroneDefensePrototype() {
               <MogCompositionEditor
                 objectId={selectedMogObject.id}
                 asset={selectedPlacedAsset}
+                costLine={costLines.find(line => line.objectId === selectedMogObject.id)}
                 layerLabel={
                   selectedPlacedLayer ? `${selectedPlacedLayer.code} · ${selectedPlacedLayer.name}` : "—"
                 }
@@ -1112,7 +1125,7 @@ export function DroneDefensePrototype() {
                         </p>
                         <p className={styles.prototypeMeta}>
                           {formatLayerRange(selectedRadii.innerRadiusM, selectedRadii.outerRadiusM)} ·{" "}
-                          {formatLayerObjectMeta(activeLayerSummary?.objectCount ?? 0, activeLayerSummary?.totalMln ?? 0)}
+                          {formatLayerObjectMeta(activeLayerSummary?.objectCount ?? 0, activeLayerSummary ? activeLayerSummary.totalMinor : "0")}
                         </p>
                       </div>
                       <button
@@ -1308,7 +1321,7 @@ export function DroneDefensePrototype() {
                               {formatLayerRange(summary?.innerRadiusM ?? 0, summary?.outerRadiusM ?? 0)}
                             </p>
                             <p className={styles.prototypeMeta}>
-                              {formatLayerObjectMeta(summary?.objectCount ?? 0, summary?.totalMln ?? 0)}
+                              {formatLayerObjectMeta(summary?.objectCount ?? 0, summary ? summary.totalMinor : "0")}
                             </p>
                           </button>
                           {layer.isLocked ? (
@@ -1402,6 +1415,7 @@ export function DroneDefensePrototype() {
           </p>
         </Modal>
       </main>
+      </div>
     </div>
   );
 }

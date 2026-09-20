@@ -1,3 +1,4 @@
+import type { DataProvenance, PriceComponent } from "@/shared/types/finance";
 import type { DefensePriority } from "@/shared/types/defense-configuration";
 import type { DefenseAssetCompoundProfile, PlacedDefenseCompoundProfile } from "@/shared/types/defense-configuration";
 
@@ -71,6 +72,11 @@ export type DefenseAsset = {
   category: DefenseAssetCategory;
   roles: DefenseAssetRole[];
   pricePerUnitMln: number | null;
+  unitPriceMinor?: string | null;
+  pricingMode?: "bundle" | "components";
+  components?: PriceComponent[];
+  provenance?: DataProvenance | null;
+  fieldProvenance?: Record<string, DataProvenance>;
   currency: "RUB";
   unitLabel: string;
   compatibleLayerTypes?: LayerType[];
@@ -115,6 +121,8 @@ export type PlacedDefenseObject = {
   status: "planned" | "active" | "inactive" | "maintenance";
   isVisibleOnMap?: boolean;
   customPricePerUnitMln?: number;
+  customPriceMinor?: string | null;
+  fieldProvenance?: Record<string, DataProvenance>;
   customCoverageRadius?: number;
   customCoverageAngle?: number;
   compoundProfile?: PlacedDefenseCompoundProfile;
@@ -182,7 +190,9 @@ export type ProjectCalculatorConfiguration = {
 export type LayerCost = {
   layerId: string;
   layerName: string;
-  totalMln: number;
+  totalMln: number | null;
+  totalMinor: string | null;
+  knownSubtotalMinor: string;
 };
 
 export type LayerSummary = LayerCost & {

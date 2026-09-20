@@ -153,7 +153,7 @@ function layerColor(layer: DefenseLayer): [number, number, number] {
       parseInt(layer.color.slice(5, 7), 16),
     ];
   }
-  return layerColors[layer.id] ?? fallbackLayerColors[(layer.order - 1) % fallbackLayerColors.length];
+  return layerColors[layer.id] ?? fallbackLayerColors[Math.max(0, layer.order - 1) % fallbackLayerColors.length];
 }
 
 export function findNextBuildableCatalogGroupForLayer({

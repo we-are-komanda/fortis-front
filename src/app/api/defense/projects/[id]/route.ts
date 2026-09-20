@@ -3,7 +3,10 @@ import { validateProjectPayload, validateVariantSummary } from "@/modules/drone-
 export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: Ctx) {
-  return forwardBackendJson(`/projects/export?id=${encodeURIComponent((await params).id)}`, request, validateProjectPayload);
+  const query = new URLSearchParams({ id: (await params).id });
+  const version = new URL(request.url).searchParams.get("projectVersion");
+  if (version !== null) query.set("projectVersion", version);
+  return forwardBackendJson(`/projects/export?${query}`, request, validateProjectPayload);
 }
 export async function PUT(request: Request, { params }: Ctx) {
   return forwardBackendJson(`/projects/update?id=${encodeURIComponent((await params).id)}`, request, validateVariantSummary);

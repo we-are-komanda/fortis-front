@@ -16,7 +16,10 @@ const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
 Object.defineProperty(globalThis, "fetch", {
   value: async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ input, init });
-    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    return Response.json(String(input).includes("/projects/cost") ? {
+      identity: {projectId:"proj-1",projectVersion:7,calculationVersion:"cost-rub-v1",snapshotDigest:"a".repeat(64),inputDataVersions:{}},
+      currency:"RUB",lines:[],byLayer:[],byType:[],totalMinor:"0",knownSubtotalMinor:"0",isComplete:true,unknownPriceObjectIds:[],warnings:[],
+    } : {ok:true});
   },
   configurable: true,
   writable: true,
@@ -32,11 +35,11 @@ async function main() {
     "documents download URL must target backend documents API",
   );
 
-  await getBackendProjectCost("proj-1");
+  await getBackendProjectCost("proj-1", 7);
   await getBackendProjectReport("proj-1", { hideCost: true });
   await compareBackendProjects("proj-1", "proj-2");
 
-  assert(String(calls[0]?.input) === "/api/v1/projects/cost?id=proj-1", "cost helper must call /projects/cost");
+  assert(String(calls[0]?.input) === "/api/v1/projects/cost?projectId=proj-1&projectVersion=7", "cost helper must call /projects/cost");
   assert(
     String(calls[1]?.input) === "/api/v1/projects/report?id=proj-1&hideCost=true",
     "report helper must call /projects/report with hideCost",

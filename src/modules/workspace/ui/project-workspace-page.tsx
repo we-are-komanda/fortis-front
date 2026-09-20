@@ -14,6 +14,7 @@ export function ProjectWorkspacePage() {
   const router = useRouter();
   const [enterprises, setEnterprises] = useState<ProtectedObjectOption[]>([]);
   const [enterpriseStatus, setEnterpriseStatus] = useState<"idle" | "loading" | "error">("loading");
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const [selectedEnterpriseId, setSelectedEnterpriseId] = useState<string | null>(null);
   const [newProjectName, setNewProjectName] = useState("Новая конфигурация");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -37,7 +38,8 @@ export function ProjectWorkspacePage() {
       .then((items) => {
         if (cancelled) return;
         setEnterprises(items);
-        setSelectedEnterpriseId((current) => current ?? items[0]?.enterpriseId ?? null);
+        setSelectedEnterpriseId((current) => items.some((item) => item.enterpriseId === current)
+          ? current : items[0]?.enterpriseId ?? null);
         setEnterpriseStatus("idle");
       })
       .catch(() => {
@@ -48,18 +50,18 @@ export function ProjectWorkspacePage() {
     return () => {
       cancelled = true;
     };
-  }, [fetchVariants]);
+  }, [fetchVariants, refreshVersion]);
 
   const selectedEnterprise = useMemo(
-    () => enterprises.find((item) => item.enterpriseId === selectedEnterpriseId) ?? enterprises[0],
-    [enterprises, selectedEnterpriseId],
+    () => enterpriseStatus === "idle" ? enterprises.find((item) => item.enterpriseId === selectedEnterpriseId) : undefined,
+    [enterprises, selectedEnterpriseId, enterpriseStatus],
   );
 
   const filteredVariants = useMemo(() => {
-    if (!selectedEnterpriseId) return variants;
+    if (!selectedEnterprise) return [];
     const scoped = variants.filter((item) => item.enterpriseId === selectedEnterpriseId);
     return scoped;
-  }, [selectedEnterpriseId, variants]);
+  }, [selectedEnterprise, selectedEnterpriseId, variants]);
 
   async function handleCreateProject() {
     if (!selectedEnterprise) return;
@@ -116,7 +118,7 @@ export function ProjectWorkspacePage() {
           <button
             type="button"
             onClick={() => {
-              void fetchVariants();
+              setRefreshVersion((version) => version + 1);
             }}
             className="inline-flex h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:border-blue-400 hover:text-blue-700"
           >
@@ -137,7 +139,13 @@ export function ProjectWorkspacePage() {
             <div className="mt-4 flex flex-col gap-2">
               {enterpriseStatus === "loading" ? <p className="text-sm text-slate-500">Загрузка...</p> : null}
               {enterpriseStatus === "error" ? (
-                <p className="text-sm text-amber-700">Не удалось загрузить предприятия.</p>
+                <p role="alert" className="text-sm text-amber-700">Не удалось загрузить предприятия. Нажмите «Обновить», чтобы повторить попытку.</p>
+              ) : null}
+              {enterpriseStatus === "idle" && enterprises.length === 0 ? (
+                <div role="status" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  <p className="font-semibold">Нет доступных предприятий.</p>
+                  <p className="mt-2">Для создания конфигурации администратор должен назначить вашему аккаунту доступ к предприятию. После назначения нажмите «Обновить».</p>
+                </div>
               ) : null}
               {enterprises.map((enterprise) => (
                 <button
@@ -162,6 +170,7 @@ export function ProjectWorkspacePage() {
               <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Новая конфигурация</h2>
               <div className="mt-4 flex flex-col gap-3 sm:flex-row">
                 <input
+                  aria-label="Название конфигурации"
                   value={newProjectName}
                   onChange={(event) => setNewProjectName(event.target.value)}
                   className="h-10 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-blue-500"
@@ -188,7 +197,9 @@ export function ProjectWorkspacePage() {
                 <p className="p-4 text-sm text-slate-500">Загрузка конфигураций...</p>
               ) : null}
               {filteredVariants.length === 0 && listStatus !== "loading" ? (
-                <p className="p-4 text-sm text-slate-500">Для выбранного предприятия пока нет конфигураций.</p>
+                <p className="p-4 text-sm text-slate-500">{selectedEnterprise
+                  ? "Для выбранного предприятия пока нет конфигураций. Введите название выше и нажмите «Создать», чтобы перейти к карте."
+                  : "Конфигурации появятся после выбора доступного предприятия."}</p>
               ) : null}
               <div className="divide-y divide-slate-100">
                 {filteredVariants.map((project) => (

@@ -2,6 +2,18 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+For the local Fortis workspace, start the backend on port `8090` and create
+`.env.development.local` in this directory:
+
+```dotenv
+BACKEND_URL=http://127.0.0.1:8090
+FORTIS_LOCAL_DEVELOPMENT=true
+```
+
+Without backend configuration, sign-in returns `503 configuration_error`.
+Check the connection at `/api/health/ready`. These settings apply only to
+development; production requires an explicitly configured backend and transport.
+
 First, run the development server:
 
 ```bash

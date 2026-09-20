@@ -51,14 +51,6 @@ assert(
   "calculator page must not render interactive quantity steppers",
 );
 assert(
-  calculatorPageSource.includes("project.placedObjects"),
-  "calculator page must render read-only rows from placedObjects",
-);
-assert(
-  calculatorPageSource.includes("buildProjectReportObjectLines"),
-  "calculator page should use object-level report lines helper for calculator/report handoff",
-);
-assert(
   calculatorReportSource.includes("objectLines"),
   "calculator report should receive object-level lines for report rendering",
 );

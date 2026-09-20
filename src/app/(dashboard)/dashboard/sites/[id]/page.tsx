@@ -1,10 +1,9 @@
-import { SiteDetailPage } from "@/modules/sites/ui/site-detail-page";
-import { mockSites } from "@/shared/lib/mock-data";
+import { canOpenCapability } from "@/shared/config/product-capabilities";
+import { getRuntimeMode } from "@/shared/server/runtime-config";
+import { CapabilityNotice } from "@/shared/ui/release-capability";
 
-export function generateStaticParams() {
-  return mockSites.map((site) => ({ id: site.id }));
-}
-
-export default function Page({ params }: { params: { id: string } }) {
-  return <SiteDetailPage siteId={params.id} />;
+export default async function Page({ params }: { params: Promise<{ id: string }> }) {
+  if (!canOpenCapability("operational", getRuntimeMode())) return <CapabilityNotice capability="operational" />;
+  const { SiteDetailPage } = await import("@/modules/sites/ui/site-detail-page");
+  return <SiteDetailPage siteId={(await params).id} />;
 }

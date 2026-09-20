@@ -8,10 +8,11 @@ import {
   CalculatorOutlined,
   EnvironmentOutlined,
   LineChartOutlined,
-  ExportOutlined,
   RadarChartOutlined,
 } from "@ant-design/icons";
 import { useDefenseStudioStore } from "@/modules/drone-defense/domain/use-defense-studio-store";
+import { canOpenCapability } from "@/shared/config/product-capabilities";
+import { useRuntimeMode } from "@/shared/ui/runtime-provider";
 import { VariantSaveButton, VariantStatusButton } from "@/modules/drone-defense/ui/variant-selector";
 
 type DefenseStudioShellProps = {
@@ -20,11 +21,12 @@ type DefenseStudioShellProps = {
 
 const railItemClassName =
   "flex h-14 w-full flex-col items-center justify-center gap-1 rounded-xl text-[10px] font-semibold transition";
-const mobileItemClassName = "grid h-9 place-items-center rounded-lg text-xs font-semibold transition";
+const mobileItemClassName = "grid min-h-11 place-items-center rounded-lg text-xs font-semibold transition";
 const scenarioModelingTitle = "Прототип Модуля сценарного моделирования";
 
 export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
   const pathname = usePathname();
+  const runtimeMode = useRuntimeMode();
   const searchParams = useSearchParams();
   const view = useDefenseStudioStore((state) => state.view);
   const setView = useDefenseStudioStore((state) => state.setView);
@@ -57,7 +59,7 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
         <aside className="hidden w-[76px] shrink-0 flex-col border-r border-slate-200 bg-white shadow-sm lg:flex">
           <div className="flex h-[74px] items-center justify-center border-b border-slate-100">
             <Link
-              href="/dashboard"
+              href="/workspace"
               className="inline-flex h-11 w-11 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
               title="Назад"
             >
@@ -76,7 +78,7 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
               </span>
               <span>Карта</span>
             </Link>
-            <Link
+            {canOpenCapability("calculation", runtimeMode) && (<Link
               href="/calculator"
               className={`${railItemClassName} ${isCalculator ? activeRailClassName : idleRailClassName}`}
               title="Просчитать конфигурацию в калькуляторе"
@@ -85,8 +87,8 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
                 <CalculatorOutlined />
               </span>
               <span>Расчёт</span>
-            </Link>
-            <Link
+            </Link>)}
+            {canOpenCapability("scenarios", runtimeMode) && (<Link
               href="/prototype?view=scenario-modeling"
               className={`${railItemClassName} ${isDrilldownActive ? activeRailClassName : idleRailClassName}`}
               onClick={() => setView("drilldown")}
@@ -96,8 +98,8 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
                 <RadarChartOutlined />
               </span>
               <span>Сценарии</span>
-            </Link>
-            <Link
+            </Link>)}
+            {canOpenCapability("retrospective", runtimeMode) && (<Link
               href="/retrospective-analysis"
               className={`${railItemClassName} ${isRetrospective ? activeRailClassName : idleRailClassName}`}
               title="Анализ цепочки атаки (WIP)"
@@ -106,16 +108,13 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
                 <LineChartOutlined />
               </span>
               <span>Анализ</span>
-            </Link>
+            </Link>)}
           </nav>
           <div className="space-y-2 border-t border-slate-100 px-2 py-3">
             <VariantSaveButton
               iconOnly
               className="flex h-12 w-full items-center justify-center rounded-xl text-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-wait disabled:opacity-60"
             />
-            <button className="flex h-12 w-full items-center justify-center rounded-xl text-lg text-slate-400 hover:bg-slate-100" type="button" title="Экспорт">
-              <ExportOutlined />
-            </button>
           </div>
         </aside>
 
@@ -123,7 +122,7 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
           <div className="border-b border-slate-200 bg-white px-3 py-2 shadow-sm lg:hidden">
             <div className="flex items-center gap-3">
               <Link
-                href="/dashboard"
+                href="/workspace"
                 className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
                 title="Назад"
               >
@@ -144,7 +143,7 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
               <VariantStatusButton fullWidth />
             </div>
 
-            <nav className="mt-2 grid grid-cols-4 gap-1 rounded-xl bg-slate-100 p-1">
+            <nav className="mt-2 grid auto-cols-fr grid-flow-col gap-1 rounded-xl bg-slate-100 p-1">
               <Link
                 href="/prototype"
                 className={`${mobileItemClassName} ${isMapActive ? activeMobileClassName : idleMobileClassName}`}
@@ -152,27 +151,27 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
               >
                 Карта
               </Link>
-              <Link
+              {canOpenCapability("calculation", runtimeMode) && (<Link
                 href="/calculator"
                 className={`${mobileItemClassName} ${isCalculator ? activeMobileClassName : idleMobileClassName}`}
               >
                 Расчёт
-              </Link>
-              <Link
+              </Link>)}
+              {canOpenCapability("scenarios", runtimeMode) && (<Link
                 href="/prototype?view=scenario-modeling"
                 className={`${mobileItemClassName} ${isDrilldownActive ? activeMobileClassName : idleMobileClassName}`}
                 onClick={() => setView("drilldown")}
                 title={scenarioModelingTitle}
               >
                 Сценарии
-              </Link>
-              <Link
+              </Link>)}
+              {canOpenCapability("retrospective", runtimeMode) && (<Link
                 href="/retrospective-analysis"
                 className={`${mobileItemClassName} ${isRetrospective ? activeMobileClassName : idleMobileClassName}`}
                 title="Анализ цепочки атаки (WIP)"
               >
                 Анализ
-              </Link>
+              </Link>)}
             </nav>
           </div>
 

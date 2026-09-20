@@ -1,0 +1,232 @@
+{
+  "schemaVersion": 1,
+  "projectId": "local-fixture",
+  "projectName": "Synthetic release round trip",
+  "baseObject": {
+    "id": "synthetic-object",
+    "name": "Synthetic object",
+    "center": {
+      "lat": 0,
+      "lng": 0,
+      "altitude": 3
+    }
+  },
+  "layers": [
+    {
+      "id": "custom-polygon",
+      "name": "Polygon",
+      "code": "USER",
+      "description": "User note",
+      "order": 0,
+      "geometryType": "polygon",
+      "geometry": {
+        "type": "polygon",
+        "coordinates": [
+          {
+            "lat": 0,
+            "lng": 0,
+            "altitude": 3
+          },
+          {
+            "lat": 0.001,
+            "lng": 0
+          },
+          {
+            "lat": 0,
+            "lng": 0.001
+          }
+        ],
+        "points": [
+          {
+            "lat": 0,
+            "lng": 0,
+            "altitude": 3
+          },
+          {
+            "lat": 0.001,
+            "lng": 0
+          },
+          {
+            "lat": 0,
+            "lng": 0.001
+          }
+        ],
+        "isClosed": true,
+        "surveyNote": "preserved"
+      },
+      "color": "#112233",
+      "opacity": 0,
+      "isActive": true,
+      "isVisible": false,
+      "isLocked": true
+    },
+    {
+      "id": "custom-circle",
+      "name": "Circle",
+      "code": "USER2",
+      "order": 1,
+      "distanceFromObjectMin": 5,
+      "distanceFromObjectMax": 123.45,
+      "geometryType": "circle",
+      "geometry": {
+        "type": "circle",
+        "center": {
+          "lat": 0,
+          "lng": 0,
+          "altitude": 3
+        },
+        "radiusM": 123.45,
+        "innerRadiusM": 5,
+        "outerRadiusM": 123.45,
+        "widthM": 118.45,
+        "surveyNote": "preserved"
+      },
+      "isActive": false,
+      "isVisible": true,
+      "isLocked": false
+    }
+  ],
+  "assetLibrary": [
+    {
+      "id": "synthetic-asset",
+      "name": "Synthetic component",
+      "shortName": "Fixture",
+      "description": "Not real equipment",
+      "category": "software",
+      "roles": [
+        "monitor"
+      ],
+      "pricePerUnitMln": null,
+      "currency": "RUB",
+      "unitLabel": "unit",
+      "compatibleLayerTypes": [
+        "polygon",
+        "circle"
+      ],
+      "recommendedLayerCodes": [
+        "USER"
+      ],
+      "compatibleLayerCodes": [
+        "USER"
+      ],
+      "incompatibleLayerCodes": [],
+      "protectionType": "Synthetic",
+      "minEffectiveDistance": 1.25,
+      "maxEffectiveDistance": 2.5,
+      "coverageType": "none",
+      "coverageRadius": 12.5,
+      "coverageAngle": 0,
+      "deploymentType": "software",
+      "placementType": "non-physical",
+      "iconUrl": "",
+      "modelUrl": "",
+      "score": 0,
+      "priority": "low",
+      "compoundProfile": {
+        "kind": "compound-post",
+        "postType": "Synthetic fixture",
+        "personnelCount": "0",
+        "accountability": "Test only",
+        "armament": "",
+        "weaponUnits": "0",
+        "sectorOrRange": "",
+        "equipment": [
+          {
+            "id": "binoculars",
+            "label": "Synthetic component",
+            "quantity": "2",
+            "unitPriceMln": 0.001
+          }
+        ],
+        "weapons": [],
+        "visibleCoverageWeaponIds": [],
+        "azimuth": 0,
+        "sectorWidthDeg": 0
+      },
+      "weaponSpec": {
+        "synthetic": true
+      },
+      "detectionSpec": {
+        "synthetic": true
+      },
+      "ewSpec": {
+        "synthetic": true
+      },
+      "tags": [
+        "synthetic"
+      ],
+      "legacyItemId": "legacy-fixture",
+      "calculatorAssetId": null,
+      "mapCatalogGroupIds": [
+        "custom"
+      ],
+      "enterpriseId": "11111111-1111-4111-8111-111111111111",
+      "isPublic": false,
+      "extension": {
+        "source": "test"
+      }
+    }
+  ],
+  "placedObjects": [
+    {
+      "id": "synthetic-instance",
+      "assetId": "synthetic-asset",
+      "layerId": "custom-polygon",
+      "name": "Instance override",
+      "coordinates": {
+        "lat": 0,
+        "lng": 0,
+        "altitude": 3
+      },
+      "rotation": 0,
+      "scale": 1,
+      "quantity": 2,
+      "status": "maintenance",
+      "isVisibleOnMap": false,
+      "customPricePerUnitMln": 0,
+      "customCoverageRadius": 12.5,
+      "customCoverageAngle": 0,
+      "compoundProfile": {
+        "kind": "compound-post",
+        "postType": "Synthetic fixture",
+        "personnelCount": "0",
+        "accountability": "Test only",
+        "armament": "",
+        "weaponUnits": "0",
+        "sectorOrRange": "",
+        "equipment": [
+          {
+            "id": "binoculars",
+            "label": "Synthetic component",
+            "quantity": "2",
+            "unitPriceMln": 0.001
+          }
+        ],
+        "weapons": [],
+        "visibleCoverageWeaponIds": [],
+        "azimuth": 0,
+        "sectorWidthDeg": 0
+      },
+      "hasGeometryConflict": true,
+      "hasCoverageConflict": false,
+      "hasTerrainConflict": true,
+      "notes": "Synthetic note",
+      "createdAt": "2026-09-20T00:00:00.000Z",
+      "updatedAt": "2026-09-20T00:00:00.000Z",
+      "extension": {
+        "source": "test"
+      }
+    }
+  ],
+  "activeLayerId": "custom-polygon",
+  "mode": "view",
+  "source": "custom",
+  "updatedAt": "2026-09-20T00:00:00.000Z",
+  "enterpriseId": "11111111-1111-4111-8111-111111111111",
+  "selectedAssetId": "synthetic-asset",
+  "selectedObjectId": "synthetic-instance",
+  "extension": {
+    "note": "safe non-authoritative extension",
+    "decimalText": "0.000000005"
+  }
+}

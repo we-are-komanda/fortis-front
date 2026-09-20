@@ -1,6 +1,8 @@
 "use client";
 
 import { EyeInvisibleOutlined, EyeOutlined } from "@ant-design/icons";
+import { formatMinorRub } from "@/shared/lib/cost-projection";
+import type { FinancialLine } from "@/shared/types/finance";
 import { describePlacement } from "@/modules/drone-defense/domain/placement-helpers";
 import styles from "./drone-defense-prototype.module.css";
 import type {
@@ -16,14 +18,10 @@ const statusLabel: Record<string, string> = {
   inactive: "Выключен",
 };
 
-function formatCostRub(costRub: number): string {
-  if (costRub <= 0) return "—";
-  return `${(costRub / 1_000_000).toFixed(1)} млн ₽`;
-}
-
 export function EchelonObjectsList({
   layerId,
   placements,
+  costLines,
   catalog,
   layers,
   hiddenPlacementIds,
@@ -35,6 +33,7 @@ export function EchelonObjectsList({
 }: {
   layerId: DefenseLayerId;
   placements: Placement[];
+  costLines: FinancialLine[];
   catalog: DefenseCatalogResponse | null;
   layers: DefenseLayer[];
   hiddenPlacementIds: Set<string>;
@@ -85,7 +84,7 @@ export function EchelonObjectsList({
                 </span>
               </div>
               <p className={styles.prototypeMeta}>
-                {summary.echelonShortName} · {summary.echelonName} · ×{summary.qty} · {formatCostRub(summary.costRub)}
+                {summary.echelonShortName} · {summary.echelonName} · ×{summary.qty} · {formatMinorRub(costLines.find(line => line.objectId === placement.id)?.lineTotalMinor ?? null)}
               </p>
             </button>
             <div className="mt-2 flex gap-2">

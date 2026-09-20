@@ -1,9 +1,16 @@
-// TODO: wrap with auth guard when auth is ready
-import { DashboardSidebar } from "@/modules/dashboard/ui/sidebar";
-import { DashboardHeader } from "@/modules/dashboard/ui/header";
-import { OnboardingModal } from "@/modules/onboarding/ui/onboarding-modal";
+import { canOpenCapability } from "@/shared/config/product-capabilities";
+import { getRuntimeMode } from "@/shared/server/runtime-config";
+import { CapabilityNotice } from "@/shared/ui/release-capability";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export const dynamic = "force-dynamic";
+
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  if (!canOpenCapability("operational", getRuntimeMode())) return <CapabilityNotice capability="operational" />;
+  const [{ DashboardSidebar }, { DashboardHeader }, { OnboardingModal }] = await Promise.all([
+    import("@/modules/dashboard/ui/sidebar"),
+    import("@/modules/dashboard/ui/header"),
+    import("@/modules/onboarding/ui/onboarding-modal"),
+  ]);
   return (
     <div className="relative flex h-screen overflow-hidden bg-background">
       <div aria-hidden className="pointer-events-none fixed inset-0 overflow-hidden">
@@ -20,6 +27,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden z-10">
         <div className="glass border-b border-(--glass-border)">
+          <p className="bg-amber-100 px-4 py-2 text-sm text-amber-950">Демонстрационные данные — синтетические примеры, не ваш рабочий проект.</p>
           <DashboardHeader />
         </div>
         <main className="flex-1 overflow-y-auto">

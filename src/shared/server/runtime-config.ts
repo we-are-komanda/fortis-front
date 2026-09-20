@@ -45,3 +45,10 @@ export function backendTimeoutMs(document: boolean) {
   if (!Number.isInteger(timeout) || timeout < 1 || timeout > 120_000) throw new Error("Invalid backend timeout");
   return timeout;
 }
+
+/** Persistent recovery is an explicit workspace deployment policy. */
+export function getLocalDraftsEnabled(): boolean {
+  const value = process.env.FORTIS_LOCAL_DRAFTS_ENABLED;
+  if (value !== undefined && value !== "true" && value !== "false") throw new Error("Invalid local draft policy");
+  return value === undefined ? getRuntimeMode() === "demo" : value === "true";
+}

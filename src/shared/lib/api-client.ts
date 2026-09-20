@@ -22,6 +22,7 @@ export class FortisApiError extends Error {
   readonly code?: string;
   readonly body?: unknown;
   readonly requestId?: string;
+  readonly retryAfter?: number;
 
   constructor(response: Response, body?: unknown) {
     const outer = isRecord(body) ? body : undefined;
@@ -35,6 +36,11 @@ export class FortisApiError extends Error {
     this.code = typeof payload?.code === "string" ? payload.code : codes[response.status] ?? "backend_error";
     this.requestId = response.headers.get("x-request-id") ?? response.headers.get("x-correlation-id") ?? (typeof payload?.requestId === "string" ? payload.requestId : undefined);
     this.body = body;
+    const retry = response.headers.get("retry-after") ?? "";
+    const seconds = /^\d+$/.test(retry) ? Number(retry)
+      : /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retry)
+        ? Math.max(0, Math.ceil((Date.parse(retry) - Date.now()) / 1000)) : NaN;
+    if (Number.isSafeInteger(seconds) && seconds >= 0) this.retryAfter = seconds;
   }
 }
 
@@ -72,26 +78,26 @@ export function requireListItems<T>(value: unknown): T[] {
   return items as T[];
 }
 
-export async function readJson<T>(input: RequestInfo | URL, init?: RequestInit & { fetcher?: typeof fetch }): Promise<T> {
+export async function readJson<T>(input: RequestInfo | URL, init?: RequestInit & { fetcher?: typeof fetch; sessionBound?: boolean }): Promise<T> {
   const generation = sessionGeneration();
-  const { fetcher = fetch, ...requestInit } = init ?? {};
+  const { fetcher = fetch, sessionBound = true, ...requestInit } = init ?? {};
   let response: Response;
   try { response = await fetcher(input, requestInit); } catch {
     throw new FortisApiError(new Response(null, { status: 502 }));
   }
   const text = await response.text();
-  if (generation !== sessionGeneration()) throw new DOMException("Identity changed", "AbortError");
+  if (sessionBound && generation !== sessionGeneration()) throw new DOMException("Identity changed", "AbortError");
   let body: unknown;
   try { body = text ? JSON.parse(text) : undefined; } catch {
     if (response.ok) throw new FortisProtocolError(response.headers.get("x-request-id") ?? undefined);
     body = text;
   }
   if (!response.ok) {
-    if (response.status === 401) {
+    if (sessionBound && response.status === 401) {
       setAuthenticatedIdentity(null);
       if (typeof window !== "undefined") window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     }
-    if (typeof window !== "undefined" && [403, 404].includes(response.status)) window.dispatchEvent(new CustomEvent("fortis-access-error", { detail: { status: response.status, input: String(input) } }));
+    if (sessionBound && typeof window !== "undefined" && [403, 404].includes(response.status)) window.dispatchEvent(new CustomEvent("fortis-access-error", { detail: { status: response.status, input: String(input) } }));
     throw new FortisApiError(response, body);
   }
   if (response.status !== 204 && body === undefined) throw new FortisProtocolError(response.headers.get("x-request-id") ?? undefined);

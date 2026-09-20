@@ -27,7 +27,7 @@ export type StructuralProfile = {
   categoryCount: number;
   conflictCount: number;
   coveredObjectCount: number;
-  totalMln: number; // cost is optional as a metric — no longer the headline
+  totalMln: number | null; // cost is optional as a metric — no longer the headline
   byEchelon: StructuralEchelonProfile[];
 };
 

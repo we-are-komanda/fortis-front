@@ -484,6 +484,12 @@ export const defenseAssetLibrary: DefenseAsset[] = defenseItems.map((item) => {
     roles: rolesForCategory(category),
     protectionType: item.protectionType,
     pricePerUnitMln: item.pricePerUnitMln,
+    provenance: {
+      sourceLabel: "Демонстрационный каталог Fortis",
+      sourceDocumentId: null, sourceUrl: null, sourceDate: null,
+      recordedAt: "2026-09-20T00:00:00Z", recordedBy: "bundled-demo",
+      quality: "demo", revision: "demo-catalog-v1",
+    },
     currency: item.currency,
     unitLabel: item.unitLabel,
     compatibleLayerTypes: ["circle", "ring", "polygon", "freeform"],

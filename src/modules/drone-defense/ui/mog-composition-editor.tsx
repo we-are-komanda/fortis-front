@@ -11,13 +11,13 @@ import {
   type ReactNode,
 } from "react";
 import { AlertTriangle, Info, X } from "lucide-react";
+import { formatMinorRub } from "@/shared/lib/cost-projection";
+import type { FinancialLine } from "@/shared/types/finance";
 import { cn } from "@/lib/utils";
 import {
   buildMogCoverageInputMap,
-  buildMogCostSummary,
   clampMogAzimuth,
   clampMogSector,
-  formatMogMoney,
   formatMogOption,
   formatMogRange,
   hasMogErrors,
@@ -41,6 +41,7 @@ import styles from "./drone-defense-prototype.module.css";
 type MogCompositionEditorProps = {
   objectId: string;
   asset: DefenseAsset;
+  costLine?: FinancialLine;
   layerLabel: string;
   profile: PlacedDefenseCompoundProfile;
   onPreviewChange: (patch: Partial<PlacedDefenseObject>) => void;
@@ -297,6 +298,7 @@ function MogSectorDial({
 export function MogCompositionEditor({
   objectId,
   asset,
+  costLine,
   layerLabel,
   profile,
   onPreviewChange,
@@ -320,7 +322,6 @@ export function MogCompositionEditor({
     setCoverageInputs(buildMogCoverageInputMap(nextInitialProfile));
   }, [objectId, profile]);
 
-  const costSummary = useMemo(() => buildMogCostSummary(asset), [asset]);
   const visibleCoverageWeapons = useMemo(() => getVisibleMogCoverageWeapons(draft), [draft]);
   const visibleCoverageWeaponIds = useMemo(
     () => new Set(visibleCoverageWeapons.map((weapon) => weapon.id)),
@@ -524,7 +525,7 @@ export function MogCompositionEditor({
               </div>
               <h2 className={`${styles.prototypeTitleLarge} mt-3`}>Настройка МОГ</h2>
               <p className={`${styles.prototypeMeta} mt-2`}>
-                {draft.postType} · {layerLabel} · {formatMogMoney(costSummary.baseMln)}
+                {draft.postType} · {layerLabel} · {formatMinorRub(costLine?.unitPriceMinor ?? null)}
               </p>
             </div>
             <button
@@ -816,31 +817,11 @@ export function MogCompositionEditor({
               </div>
             </EditorSection>
 
-            <EditorSection title="Стоимость" eyebrow="Текущая оценка" tone="accent">
+            <EditorSection title="Стоимость" eyebrow="По указанным ценам" tone="accent">
               <div className="space-y-3">
-                <div className={`${styles.prototypeMeta} flex items-center justify-between gap-3`}>
-                  <span>База поста</span>
-                  <strong className="text-slate-950">{formatMogMoney(costSummary.baseMln)}</strong>
-                </div>
-                <div className={`${styles.prototypeMeta} flex items-center justify-between gap-3`}>
-                  <span>Оснащение</span>
-                  <strong className="text-slate-950">{formatMogMoney(costSummary.equipmentMln)}</strong>
-                </div>
-                <div className={`${styles.prototypeMeta} flex items-center justify-between gap-3`}>
-                  <span>Оружие</span>
-                  <strong className="text-slate-950">{formatMogMoney(costSummary.weaponsMln)}</strong>
-                </div>
-                <div className="border-t border-amber-200 pt-3">
-                  <div className="flex items-center justify-between gap-3 text-base font-semibold text-slate-950">
-                    <span>Итого</span>
-                    <span>{formatMogMoney(costSummary.totalMln)}</span>
-                  </div>
-                  {costSummary.isEstimate ? (
-                    <p className={`${styles.prototypeMeta} mt-2`}>
-                      Итог пока учитывает базовую стоимость поста. Стоимость оснащения и оружия подключим отдельно, когда она появится в данных.
-                    </p>
-                  ) : null}
-                </div>
+                <p className={styles.prototypeMeta}>Цена за единицу: {formatMinorRub(costLine?.unitPriceMinor ?? null)}</p>
+                <p className="text-base font-semibold text-slate-950">{costLine?.quantity ?? "—"} единиц · {formatMinorRub(costLine?.lineTotalMinor ?? null)}</p>
+                <p className={styles.prototypeMeta}>Состав поста сам по себе не задаёт цену. В смету входят явно заданная цена экземпляра, цена комплекта или его финансовые компоненты.</p>
               </div>
             </EditorSection>
           </div>

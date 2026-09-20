@@ -10,12 +10,12 @@ const sidebarSource = readFileSync("src/modules/dashboard/ui/sidebar.tsx", "utf8
 const pageImports = pageSource.match(/^import .*$/gm) ?? [];
 
 assert(
-  /import\s+\{\s*RetrospectiveAnalysisPage\s*\}\s+from\s+"@\/modules\/drone-defense\/ui\/retrospective-analysis"\s*;?/.test(
+  /const\s+\{\s*RetrospectiveAnalysisPage\s*\}\s*=\s*await import\("@\/modules\/drone-defense\/ui\/retrospective-analysis"\)/.test(
     pageSource,
   ),
-  "Retrospective page should import the module root component only",
+  "Retrospective page should load its module after the server capability gate",
 );
-assert(pageImports.length === 1, "Retrospective page should have a single module import");
+assert(pageImports.length === 3, "Retrospective page should import its server capability gate dependencies");
 assert(!/usePathname/.test(pageSource), "Retrospective page should stay simple and server-safe");
 
 assert(

@@ -363,11 +363,13 @@ async function runAssetLibraryRefreshContracts() {
     ],
   });
 
+  assert(useDefenseProjectStore.getState().assetLibraryPreview, "refresh must preview before changing the project");
+  useDefenseProjectStore.getState().applyAssetLibraryPreview();
   const refreshed = useDefenseProjectStore.getState();
   assert(refreshed.assetLibraryLoading === false, "refreshAssetLibrary must clear loading after success");
   assert(refreshed.assetLibraryError === null, "refreshAssetLibrary must clear stale errors after success");
-  assert(refreshed.project.assetLibrary.length === 1, "refreshAssetLibrary must replace project assetLibrary with server items");
-  assert(refreshed.project.assetLibrary[0].id === "server-radar", "refreshAssetLibrary must use server asset ids");
+  assert(refreshed.project.assetLibrary.some(asset => asset.id === "mobile-radar"), "refresh must preserve historical sources absent from fresh catalogue");
+  assert(refreshed.project.assetLibrary.some(asset => asset.id === "server-radar"), "explicit refresh must include server asset ids");
   assert(refreshed.project.placedObjects.length === 1, "refreshAssetLibrary must not delete placed objects");
   assert(
     refreshed.project.placedObjects[0].assetId === "mobile-radar",
@@ -380,7 +382,7 @@ async function runAssetLibraryRefreshContracts() {
   const emptyState = useDefenseProjectStore.getState();
   assert(emptyState.assetLibraryLoading === false, "empty asset refresh must clear loading");
   assert(emptyState.assetLibraryError === null, "legitimate empty is not an error");
-  assert(emptyState.project.assetLibrary.length === 0, "empty response must remain empty");
+  assert(emptyState.project.assetLibrary === refreshed.project.assetLibrary, "empty catalogue response must not erase a project snapshot");
 
   const beforeFailure = useDefenseProjectStore.getState().project.assetLibrary;
   await useDefenseProjectStore.getState().refreshAssetLibrary({

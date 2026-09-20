@@ -181,7 +181,7 @@ export function CalculatorReport({
                   <td className="num">{layer.unitCount}</td>
                   <td className="num">{layer.coverageScore}</td>
                   <td className="num">{layer.conflictCount > 0 ? layer.conflictCount : "—"}</td>
-                  <td className="num strong">{layer.totalMln > 0 ? formatMln(layer.totalMln) : "—"}</td>
+                  <td className="num strong">{formatMln(layer.totalMln)}</td>
                 </tr>
               ))}
             </tbody>

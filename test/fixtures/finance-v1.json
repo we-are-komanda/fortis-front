@@ -1,0 +1,164 @@
+{
+  "fixtureVersion": "finance-v1",
+  "description": "Synthetic accounting inputs only; not a DefenseProject wire payload or real equipment catalogue.",
+  "currency": "RUB",
+  "layers": [
+    {
+      "id": "layer-custom-a",
+      "name": "Пользовательская группа А"
+    },
+    {
+      "id": "layer-custom-b",
+      "name": "Пользовательская группа Б"
+    }
+  ],
+  "assets": [
+    {
+      "id": "asset-a",
+      "name": "Тестовый модуль А",
+      "unitPriceMinor": "12500000",
+      "quality": "estimated"
+    },
+    {
+      "id": "asset-b",
+      "name": "Тестовый модуль Б",
+      "unitPriceMinor": "5000000",
+      "quality": "estimated"
+    }
+  ],
+  "variantA": {
+    "projectId": "fixture-project-a",
+    "projectVersion": 7,
+    "objects": [
+      {
+        "id": "obj-1",
+        "assetId": "asset-a",
+        "layerId": "layer-custom-a",
+        "quantity": 2
+      },
+      {
+        "id": "obj-2",
+        "assetId": "asset-b",
+        "layerId": "layer-custom-b",
+        "quantity": 3,
+        "isVisibleOnMap": false
+      },
+      {
+        "id": "obj-3",
+        "assetId": "asset-a",
+        "layerId": "layer-custom-b",
+        "quantity": 1,
+        "customPriceMinor": "7500000"
+      }
+    ],
+    "expectedTotalMinor": "47500000",
+    "expectedByLayer": {
+      "layer-custom-a": "25000000",
+      "layer-custom-b": "22500000"
+    },
+    "budget": {
+      "mode": "limited",
+      "limitMinor": "50000000",
+      "expectedRemainingMinor": "2500000"
+    }
+  },
+  "variantB": {
+    "projectId": "fixture-project-b",
+    "projectVersion": 3,
+    "objects": [
+      {
+        "id": "obj-1",
+        "assetId": "asset-a",
+        "layerId": "layer-custom-a",
+        "quantity": 3
+      },
+      {
+        "id": "obj-2",
+        "assetId": "asset-b",
+        "layerId": "layer-custom-b",
+        "quantity": 2,
+        "isVisibleOnMap": false
+      },
+      {
+        "id": "obj-3",
+        "assetId": "asset-a",
+        "layerId": "layer-custom-b",
+        "quantity": 1,
+        "customPriceMinor": "7500000"
+      }
+    ],
+    "expectedTotalMinor": "55000000",
+    "expectedByLayer": {
+      "layer-custom-a": "37500000",
+      "layer-custom-b": "17500000"
+    },
+    "budget": {
+      "mode": "unlimited",
+      "limitMinor": null,
+      "expectedRemainingMinor": null
+    }
+  },
+  "comparison": {
+    "expectedDifferenceMinor": "7500000",
+    "expectedDifferencePercentRounded2": "15.79"
+  },
+  "compound": {
+    "name": "Тестовый комплект",
+    "pricingMode": "components",
+    "quantity": 2,
+    "components": [
+      {
+        "name": "Модуль C",
+        "quantity": 1,
+        "unitPriceMinor": "4000000"
+      },
+      {
+        "name": "Аксессуар D",
+        "quantity": 2,
+        "unitPriceMinor": "500000"
+      }
+    ],
+    "ignoredBundlePriceMinor": "9000000",
+    "expectedUnitMinor": "5000000",
+    "expectedTotalMinor": "10000000"
+  },
+  "boundaryTests": [
+    {
+      "id": "BUDGET-EQUAL",
+      "baseMinor": "47500000",
+      "addMinor": "2500000",
+      "limitMinor": "50000000",
+      "allowed": true
+    },
+    {
+      "id": "BUDGET-OVER-ONE-KOPECK",
+      "baseMinor": "47500000",
+      "addMinor": "2500001",
+      "limitMinor": "50000000",
+      "allowed": false
+    },
+    {
+      "id": "ZERO-OVERRIDE",
+      "templateMinor": "12500000",
+      "overrideMinor": "0",
+      "quantity": 2,
+      "expectedMinor": "0"
+    },
+    {
+      "id": "UNKNOWN-PRICE",
+      "priceMinor": null,
+      "expectedTotalMinor": null,
+      "isComplete": false
+    },
+    {
+      "id": "LEGACY-CONVERSION",
+      "priceMlnText": "0.125",
+      "expectedUnitMinor": "12500000"
+    },
+    {
+      "id": "ROUND-HALF-UP",
+      "priceMlnText": "0.000000005",
+      "expectedUnitMinor": "1"
+    }
+  ]
+}

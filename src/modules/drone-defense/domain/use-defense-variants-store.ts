@@ -161,8 +161,8 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
       const known = get().variants.find((v) => v.projectId === id);
       useDefenseProjectStore.getState().replaceProject({
         ...project,
-        enterpriseId: known?.enterpriseId ?? project.enterpriseId ?? project.baseObject.id,
-        version: known?.version ?? project.version,
+        enterpriseId: project.enterpriseId ?? project.baseObject.id,
+        version: project.version,
         source: "backend",
       });
       useDefenseProjectStore.setState({ syncStatus: "saved", accessError: null });

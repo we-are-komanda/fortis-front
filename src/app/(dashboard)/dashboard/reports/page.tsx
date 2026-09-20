@@ -1,5 +1,9 @@
-import { ReportsPage } from "@/modules/analytics/ui/reports-page";
+import { canOpenCapability } from "@/shared/config/product-capabilities";
+import { getRuntimeMode } from "@/shared/server/runtime-config";
+import { CapabilityNotice } from "@/shared/ui/release-capability";
 
-export default function Page() {
+export default async function Page() {
+  if (!canOpenCapability("operational", getRuntimeMode())) return <CapabilityNotice capability="operational" />;
+  const { ReportsPage } = await import("@/modules/analytics/ui/reports-page");
   return <ReportsPage />;
 }

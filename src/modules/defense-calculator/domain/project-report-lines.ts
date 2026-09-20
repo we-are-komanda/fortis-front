@@ -1,7 +1,7 @@
+import { buildDraftCostProjection } from "@/shared/lib/cost-projection";
 import {
   getMogWeaponCoverageSettings,
   getVisibleMogCoverageWeaponIds,
-  priceForPlacedObject,
 } from "@/shared/lib/defense-project";
 import { getPolygonArea, getPolygonCoordinates } from "@/shared/lib/defense-layer-geometry";
 import type { DefenseProject } from "@/shared/types/defense-project";
@@ -17,8 +17,10 @@ export type ProjectObjectReportLine = {
   assetId: string;
   assetName: string;
   quantity: number;
-  unitPriceMln: number;
-  lineTotalMln: number;
+  unitPriceMln: number | null;
+  lineTotalMln: number | null;
+  unitPriceMinor: string | null;
+  lineTotalMinor: string | null;
   protectionType: string;
   isCompoundPost: boolean;
   compositionSummary?: string;
@@ -81,10 +83,11 @@ export function buildProjectReportObjectLines(project: DefenseProject): ProjectO
   const layersById = new Map(project.layers.map((layer) => [layer.id, layer]));
   const assetsById = new Map(project.assetLibrary.map((asset) => [asset.id, asset]));
 
+  const costs = new Map(buildDraftCostProjection(project).lines.map(line => [line.objectId,line]));
   return project.placedObjects.map((object) => {
     const layer = layersById.get(object.layerId);
     const asset = assetsById.get(object.assetId);
-    const unitPriceMln = priceForPlacedObject(project, object);
+    const cost = costs.get(object.id)!;
     const isCompoundPost = object.compoundProfile?.kind === "compound-post";
     const compoundProfile = object.compoundProfile;
     const geometryMeta = getLayerGeometryReportMeta(layer);
@@ -98,8 +101,10 @@ export function buildProjectReportObjectLines(project: DefenseProject): ProjectO
       assetId: object.assetId,
       assetName: object.name ?? asset?.name ?? object.assetId,
       quantity: object.quantity,
-      unitPriceMln,
-      lineTotalMln: unitPriceMln * object.quantity,
+      unitPriceMln: cost.unitPriceMinor === null ? null : Number(cost.unitPriceMinor) / 100_000_000,
+      lineTotalMln: cost.lineTotalMinor === null ? null : Number(cost.lineTotalMinor) / 100_000_000,
+      unitPriceMinor: cost.unitPriceMinor,
+      lineTotalMinor: cost.lineTotalMinor,
       protectionType: asset?.protectionType ?? "—",
       isCompoundPost,
       ...(isCompoundPost && compoundProfile

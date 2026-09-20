@@ -31,8 +31,8 @@ const monoFont = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Fortis — Drone Defense Platform",
-  description: "Industrial drone defense configurator and management platform.",
+  title: "Fortis — Планирование конфигураций безопасности",
+  description: "Планирование конфигураций и бюджета безопасности объекта",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

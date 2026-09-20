@@ -1,6 +1,7 @@
 import { exportDefenseProjectJson } from "@/shared/lib/defense-project";
 import { readJson, isRecord, FortisProtocolError } from "@/shared/lib/api-client";
 import type { DefenseProject, VariantListResponse, VariantSummary } from "@/shared/types/defense-project";
+import type { SaveAttempt } from "@/shared/lib/project-save-state";
 import type {
   Configuration,
   DefenseCatalogResponse,
@@ -35,7 +36,7 @@ export function validateProjectPayload(data: unknown) {
 }
 
 export function validateVariantSummary(data: unknown) {
-  if (!isRecord(data) || typeof data.projectId !== "string" || typeof data.version !== "number") throw new FortisProtocolError();
+  if (!isRecord(data) || typeof data.projectId !== "string" || !data.projectId || !Number.isSafeInteger(data.version) || Number(data.version) < 1) throw new FortisProtocolError();
 }
 
 export function fetchCatalog() {
@@ -78,8 +79,9 @@ export async function listVariants(): Promise<VariantListResponse> {
   return data;
 }
 
-export async function loadVariant(id: string, signal?: AbortSignal): Promise<DefenseProject> {
-  const data = await readVariantJson<DefenseProject>(`/api/defense/projects/${encodeURIComponent(id)}`, { signal });
+export async function loadVariant(id: string, signal?: AbortSignal, projectVersion?: number): Promise<DefenseProject> {
+  const query = projectVersion === undefined ? "" : `?projectVersion=${encodeURIComponent(projectVersion)}`;
+  const data = await readVariantJson<DefenseProject>(`/api/defense/projects/${encodeURIComponent(id)}${query}`, { signal });
   validateProjectPayload(data);
   return data;
 }
@@ -93,10 +95,26 @@ function projectUpdatePayload(args: { name: string; project: DefenseProject }) {
   };
 }
 
-export function saveVariantAsNew(args: { name: string; project: DefenseProject }): Promise<VariantSummary> {
+export function prepareProjectSave(kind: SaveAttempt["kind"], name: string, project: DefenseProject, businessRevision: number): SaveAttempt {
+  return { kind, name, project, businessRevision, body: JSON.stringify(projectUpdatePayload({ name, project })),
+    startedAt: new Date().toISOString(), ...(kind === "create" ? { idempotencyKey: crypto.randomUUID() } : {}) };
+}
+
+export async function sendProjectSaveAttempt(attempt: SaveAttempt): Promise<VariantSummary> {
+  const data = await readVariantJson<VariantSummary>(attempt.kind === "create" ? "/api/defense/projects" : `/api/defense/projects/${encodeURIComponent(attempt.project.projectId)}`, {
+    method: attempt.kind === "create" ? "POST" : "PUT",
+    headers: { "Content-Type": "application/json", ...(attempt.idempotencyKey ? { "Idempotency-Key": attempt.idempotencyKey } : {}) },
+    body: attempt.body,
+  });
+  validateVariantSummary(data);
+  if (attempt.kind === "update" && (data.projectId !== attempt.project.projectId || data.version !== (attempt.project.version ?? 0) + 1)) throw new FortisProtocolError();
+  return data;
+}
+
+export function saveVariantAsNew(args: { name: string; project: DefenseProject; idempotencyKey?: string }): Promise<VariantSummary> {
   return readVariantJson<VariantSummary>("/api/defense/projects", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "Idempotency-Key": args.idempotencyKey ?? crypto.randomUUID() },
     body: JSON.stringify(projectUpdatePayload(args)),
   });
 }

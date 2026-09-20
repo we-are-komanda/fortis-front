@@ -1,3 +1,5 @@
+import { buildDraftCostProjection, CostProjectionInputError, formatMinorRub, getAssetUnitPriceMinor } from "@/shared/lib/cost-projection";
+import { preserveDemoAssetSources } from "@/shared/lib/data-provenance";
 import { defenseAssetLibrary } from "@/shared/config/defense-asset-library";
 import { defaultDefenseProjectLayers, defaultProtectedObject } from "@/shared/config/default-defense-layers";
 import {
@@ -188,9 +190,6 @@ function uniqueId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function roundMln(value: number) {
-  return Math.round(value * 10) / 10;
-}
 
 function isLayerVisible(layer: EditableDefenseLayer) {
   return layer.isVisible !== false;
@@ -218,7 +217,7 @@ const fallbackAssetImageByCategory: Record<DefenseAssetCategory, string> = {
 
 function assetSubtitle(asset: DefenseAssetLibraryItem) {
   const roles = asset.roles.join(", ");
-  const price = asset.pricePerUnitMln === null ? "без CAPEX" : `${asset.pricePerUnitMln} млн/${asset.unitLabel}`;
+  const price = assetPriceLabel(asset);
   return `${asset.shortName ?? asset.category} · ${roles} · ${price}`;
 }
 
@@ -263,10 +262,14 @@ function assetRangeLabel(asset: DefenseAssetLibraryItem) {
   return "зона задаётся на карте";
 }
 
-function assetPriceLabel(asset: DefenseAssetLibraryItem) {
-  return asset.pricePerUnitMln === null
-    ? "без CAPEX"
-    : `${asset.pricePerUnitMln.toLocaleString("ru-RU")} млн ₽/${asset.unitLabel}`;
+export function assetPriceLabel(asset: DefenseAssetLibraryItem) {
+  try {
+    const minor = getAssetUnitPriceMinor(asset);
+    return minor === null ? "Цена не указана" : `${formatMinorRub(minor)}/${asset.unitLabel}`;
+  } catch (error) {
+    if (error instanceof CostProjectionInputError) return "Некорректная цена";
+    throw error;
+  }
 }
 
 function assetCoverageLabel(asset: DefenseAssetLibraryItem) {
@@ -1072,15 +1075,17 @@ export function setAssetQuantityInProject(project: DefenseProject, assetId: stri
   );
 }
 
-export function priceForPlacedObject(project: DefenseProject, object: PlacedDefenseObject): number {
-  const asset = project.assetLibrary.find((item) => item.id === object.assetId);
-  return object.customPricePerUnitMln ?? asset?.pricePerUnitMln ?? 0;
+// ponytail: numeric millions are compatibility display only; exact results use CostProjection.
+function minorToMln(value: string | null): number | null {
+  return value === null ? null : Number(value) / 100_000_000;
 }
 
-export function calculateProjectTotalCost(project: DefenseProject): number {
-  return roundMln(
-    project.placedObjects.reduce((acc, object) => acc + priceForPlacedObject(project, object) * object.quantity, 0),
-  );
+export function priceForPlacedObject(project: DefenseProject, object: PlacedDefenseObject): number | null {
+  return minorToMln(buildDraftCostProjection({ ...project, placedObjects: [object] }).lines[0].unitPriceMinor);
+}
+
+export function calculateProjectTotalCost(project: DefenseProject): number | null {
+  return minorToMln(buildDraftCostProjection(project).totalMinor);
 }
 
 export function calculateProjectTotalUnits(project: DefenseProject): number {
@@ -1091,16 +1096,13 @@ export function calculateProjectTotalObjects(project: DefenseProject): number {
   return project.placedObjects.length;
 }
 
-export function calculateCostByLayer(project: DefenseProject): LayerCost[] {
-  return project.layers.map((layer) => ({
-    layerId: layer.id,
-    layerName: layer.name,
-    totalMln: roundMln(
-      project.placedObjects
-        .filter((object) => object.layerId === layer.id)
-        .reduce((acc, object) => acc + priceForPlacedObject(project, object) * object.quantity, 0),
-    ),
-  }));
+export function calculateCostByLayer(project: DefenseProject, projection: Pick<import("@/shared/types/finance").CostProjection, "byLayer"> | null = buildDraftCostProjection(project)): LayerCost[] {
+  const groups = new Map(projection?.byLayer.map(group => [group.id,group]) ?? []);
+  return project.layers.map(layer => {
+    const group = groups.get(layer.id);
+    const totalMinor = projection === null ? null : group ? group.totalMinor : "0";
+    return { layerId: layer.id, layerName: layer.name, totalMinor, knownSubtotalMinor: group?.knownSubtotalMinor ?? "0", totalMln: minorToMln(totalMinor) };
+  });
 }
 
 export function calculateLayerConflicts(project: DefenseProject, layerId?: string): PlacedDefenseObject[] {
@@ -1109,7 +1111,8 @@ export function calculateLayerConflicts(project: DefenseProject, layerId?: strin
   return [];
 }
 
-export function calculateLayerSummaries(project: DefenseProject): LayerSummary[] {
+export function calculateLayerSummaries(project: DefenseProject, projection?: Pick<import("@/shared/types/finance").CostProjection, "byLayer"> | null): LayerSummary[] {
+  const costs = new Map(calculateCostByLayer(project, projection).map(group => [group.layerId,group]));
   return [...project.layers]
     .sort((a, b) => a.order - b.order)
     .map((layer) => {
@@ -1117,12 +1120,10 @@ export function calculateLayerSummaries(project: DefenseProject): LayerSummary[]
       const radii = layerRadii(layer);
       const conflictCount = calculateLayerConflicts(project, layer.id).length;
       return {
-        layerId: layer.id,
         layerCode: layer.code,
-        layerName: layer.name,
         objectCount: objects.length,
         unitCount: objects.reduce((acc, object) => acc + object.quantity, 0),
-        totalMln: roundMln(objects.reduce((acc, object) => acc + priceForPlacedObject(project, object) * object.quantity, 0)),
+        ...costs.get(layer.id)!,
         coverageScore: Math.round(
           objects.reduce((acc, object) => {
             const asset = project.assetLibrary.find((item) => item.id === object.assetId);
@@ -1145,6 +1146,7 @@ function normalizeProjectAssetLibrary(assetLibrary: DefenseProject["assetLibrary
   if (!Array.isArray(assetLibrary)) throw new Error("Invalid project asset library");
   return assetLibrary.map((asset) => ({
     ...asset,
+    ...preserveDemoAssetSources(asset),
     coverageType: asset.coverageType ?? "none",
     currency: asset.currency ?? "RUB",
     roles: asset.roles ?? [],
@@ -1194,6 +1196,7 @@ function normalizeLayerGeometry(
       ...layer,
       geometryType: "polygon",
       geometry: {
+        ...geometry,
         type: "polygon",
         coordinates: getPolygonCoordinates(geometry),
         isClosed: geometry.isClosed === true,
@@ -1210,6 +1213,7 @@ function normalizeLayerGeometry(
       distanceFromObjectMax: outerRadiusM,
       geometryType: "circle",
       geometry: {
+        ...geometry,
         type: "circle",
         center: geometry.center ?? baseCenter,
         innerRadiusM,

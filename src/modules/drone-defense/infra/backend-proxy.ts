@@ -36,8 +36,13 @@ export async function forwardBackendRequest(path: string, init: RequestInit = {}
     return boundaryError(503, "configuration_error", "Backend configuration is unavailable", id);
   }
   const headers = new Headers();
-  for (const name of ["accept", "content-type", "range", "if-range", "if-none-match", "if-modified-since", "authorization"]) {
+  for (const name of ["accept", "content-type", "range", "if-range", "if-none-match", "if-modified-since", "authorization", "idempotency-key"]) {
     const value = new Headers(init.headers).get(name) ?? options.request?.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  // Only server-validated public-form context can enter the trusted proxy channel.
+  for (const name of ["origin", "x-forwarded-for"]) {
+    const value = new Headers(init.headers).get(name);
     if (value) headers.set(name, value);
   }
   const token = options.request && accessTokenFromRequest(options.request);

@@ -1,3 +1,5 @@
+import { preserveDemoAssetSources, readDataProvenance } from "@/shared/lib/data-provenance";
+import type { DataProvenance, PriceComponent } from "@/shared/types/finance";
 import { isRecord, FortisProtocolError, requireListItems, buildApiV1Url, deleteApiJson, getApiJson, postApiJson, putApiJson } from "@/shared/lib/api-client";
 import type {
   DefenseAsset,
@@ -80,7 +82,7 @@ function numberValue(payload: BackendAssetPayload, camelKey: string, snakeKey?: 
 }
 
 function kilometersToMeters(value: number | undefined) {
-  return value === undefined ? undefined : Math.round(value * 1000);
+  return value === undefined ? undefined : value * 1000;
 }
 
 function metersToKilometers(value: number | undefined) {
@@ -124,32 +126,6 @@ function mapBackendCategory(category?: string): DefenseAssetCategory {
   }
 }
 
-function mapFrontendCategory(category: DefenseAssetCategory) {
-  switch (category) {
-    case "early-warning":
-    case "command-center":
-      return "radiotechnical";
-    case "detection":
-    case "classification":
-      return "radar";
-    case "jamming":
-    case "spoofing":
-      return "electronic-warfare";
-    case "interceptor":
-      return "missile";
-    case "kinetic":
-      return "shturmovaya";
-    case "passive-protection":
-    case "engineering-protection":
-      return "fortification";
-    case "software":
-    case "external-service":
-    case "infrastructure":
-    default:
-      return "infrastructure";
-  }
-}
-
 function mapBackendRole(role: string): DefenseAssetRole {
   if (frontendRoles.has(role as DefenseAssetRole)) return role as DefenseAssetRole;
   switch (role) {
@@ -172,30 +148,6 @@ function mapBackendRole(role: string): DefenseAssetRole {
       return "monitor";
     default:
       return "monitor";
-  }
-}
-
-function mapFrontendRole(role: DefenseAssetRole) {
-  switch (role) {
-    case "detect":
-    case "track":
-      return "detection";
-    case "classify":
-      return "recon";
-    case "suppress":
-      return "ew";
-    case "destroy":
-      return "destruction";
-    case "protect":
-      return "cover";
-    case "coordinate":
-      return "c2";
-    case "delay":
-      return "deception";
-    case "alert":
-    case "monitor":
-    default:
-      return "recon";
   }
 }
 
@@ -259,6 +211,23 @@ export function buildAssetLibraryUrl(options: FetchAssetLibraryOptions = {}) {
 
 export function normalizeDefenseAssetPayload(payload: BackendAssetPayload): DefenseAsset {
   if (!isRecord(payload) || typeof payload.id !== "string" || !payload.id.trim() || typeof payload.name !== "string" || !payload.name.trim()) throw new FortisProtocolError();
+  const minor = (value: unknown) => value === null || (typeof value === "string" && /^\d{1,16}$/.test(value) && BigInt(value) <= BigInt("1000000000000000"));
+  if (payload.currency !== undefined && payload.currency !== "RUB") throw new FortisProtocolError();
+  if (payload.unitPriceMinor !== undefined && !minor(payload.unitPriceMinor)) throw new FortisProtocolError();
+  if (payload.pricingMode !== undefined && !["bundle","components"].includes(String(payload.pricingMode))) throw new FortisProtocolError();
+  if (payload.components !== undefined && (!Array.isArray(payload.components) || payload.components.length > 1000 || !payload.components.every(component =>
+    isRecord(component) && typeof component.name === "string" && (component.id === undefined || typeof component.id === "string") &&
+    Number.isInteger(component.quantity) && Number(component.quantity) >= 1 && Number(component.quantity) <= 1_000_000 && minor(component.unitPriceMinor)))) throw new FortisProtocolError();
+  const provenance = readDataProvenance(payload.provenance);
+  let fieldProvenance: Record<string, DataProvenance> | undefined;
+  if (payload.fieldProvenance !== undefined && payload.fieldProvenance !== null) {
+    if (!isRecord(payload.fieldProvenance)) throw new FortisProtocolError();
+    fieldProvenance = Object.fromEntries(Object.entries(payload.fieldProvenance).map(([field,value]) => {
+      const parsed = readDataProvenance(value);
+      if (!parsed) throw new FortisProtocolError();
+      return [field,parsed];
+    }));
+  }
   const category = mapBackendCategory(stringValue(payload, "category"));
   const roles = (stringArrayValue(payload, "roles") ?? []).map(mapBackendRole);
   const coverageType = normalizeCoverageType(stringValue(payload, "coverageType", "coverage_type"));
@@ -274,6 +243,10 @@ export function normalizeDefenseAssetPayload(payload: BackendAssetPayload): Defe
     category,
     roles: roles.length > 0 ? [...new Set(roles)] : defaultRolesForCategory(category),
     pricePerUnitMln,
+    ...(payload.unitPriceMinor !== undefined ? {unitPriceMinor: payload.unitPriceMinor as string | null} : {}),
+    pricingMode: payload.pricingMode as DefenseAsset["pricingMode"],
+    components: payload.components as PriceComponent[] | undefined,
+    ...preserveDemoAssetSources({id, legacyItemId: cleanString(stringValue(payload, "legacyItemId", "legacy_item_id")), provenance, fieldProvenance}),
     currency: "RUB",
     unitLabel: cleanString(stringValue(payload, "unitLabel", "unit_label")) ?? "шт",
     compatibleLayerTypes: stringArrayValue(payload, "compatibleLayerTypes", "compatible_layer_types") as DefenseAsset["compatibleLayerTypes"],
@@ -310,9 +283,14 @@ export function serializeDefenseAssetMutation(input: DefenseAssetMutationInput |
     name: input.name,
     shortName: input.shortName,
     description: input.description,
-    category: input.category ? mapFrontendCategory(input.category) : undefined,
-    roles: input.roles?.map(mapFrontendRole),
+    category: input.category,
+    roles: input.roles,
     pricePerUnitMln: input.pricePerUnitMln,
+    unitPriceMinor: input.unitPriceMinor,
+    pricingMode: input.pricingMode,
+    components: input.components,
+    provenance: input.provenance,
+    fieldProvenance: input.fieldProvenance,
     currency: "RUB",
     unitLabel: input.unitLabel,
     compatibleLayerTypes: input.compatibleLayerTypes,

@@ -13,9 +13,12 @@ import {
   createDefenseAsset,
   deleteDefenseAsset,
   updateDefenseAsset,
-  type DefenseAssetMutationInput,
 } from "@/modules/drone-defense/infra/asset-library-api";
+import { assetPriceLabel } from "@/shared/lib/defense-project";
+import { provenanceLabel } from "@/shared/lib/data-provenance";
+import { emptyForm, formFromAsset, formToAssetInput, type AssetFormState } from "@/modules/drone-defense/domain/asset-library-form";
 import styles from "./drone-defense-prototype.module.css";
+import { AssetDocumentsPanel } from "./asset-documents-panel";
 import type {
   DefenseAsset,
   DefenseAssetCategory,
@@ -25,6 +28,10 @@ import type {
 
 type AssetLibraryManagerProps = {
   assets: DefenseAsset[];
+  enterpriseId?: string;
+  previewAssets?: DefenseAsset[] | null;
+  onApplyPreview: () => boolean;
+  onDiscardPreview: () => void;
   placedObjects: PlacedDefenseObject[];
   selectedAssetId?: string | null;
   loading: boolean;
@@ -36,21 +43,6 @@ type AssetLibraryManagerProps = {
   onMessage: (message: string) => void;
 };
 
-type AssetFormState = {
-  id?: string;
-  name: string;
-  category: DefenseAssetCategory;
-  protectionType: string;
-  recommendedLayerCodes: string;
-  pricePerUnitMln: string;
-  maxEffectiveDistanceKm: string;
-  coverageRadiusKm: string;
-  coverageType: DefenseAssetCoverageType;
-  coverageAngle: string;
-  description: string;
-  isPublic: boolean;
-  enterpriseId: string;
-};
 
 const categoryOptions: Array<{ value: DefenseAssetCategory; label: string }> = [
   { value: "detection", label: "Обнаружение" },
@@ -76,117 +68,10 @@ const coverageTypeOptions: Array<{ value: DefenseAssetCoverageType; label: strin
   { value: "none", label: "Нет" },
 ];
 
-function emptyForm(): AssetFormState {
-  return {
-    name: "",
-    category: "detection",
-    protectionType: "",
-    recommendedLayerCodes: "L2",
-    pricePerUnitMln: "",
-    maxEffectiveDistanceKm: "",
-    coverageRadiusKm: "",
-    coverageType: "circle",
-    coverageAngle: "",
-    description: "",
-    isPublic: true,
-    enterpriseId: "",
-  };
-}
-
-function kmToMeters(value: string) {
-  const numeric = Number(value.replace(",", "."));
-  return Number.isFinite(numeric) && numeric > 0 ? Math.round(numeric * 1000) : undefined;
-}
-
-function optionalNumber(value: string) {
-  const numeric = Number(value.replace(",", "."));
-  return Number.isFinite(numeric) && numeric >= 0 ? numeric : undefined;
-}
-
-function formFromAsset(asset: DefenseAsset): AssetFormState {
-  return {
-    id: asset.id,
-    name: asset.name,
-    category: asset.category,
-    protectionType: asset.protectionType ?? "",
-    recommendedLayerCodes: asset.recommendedLayerCodes?.join(", ") ?? "",
-    pricePerUnitMln: asset.pricePerUnitMln === null ? "" : String(asset.pricePerUnitMln),
-    maxEffectiveDistanceKm: asset.maxEffectiveDistance ? String(asset.maxEffectiveDistance / 1000) : "",
-    coverageRadiusKm: asset.coverageRadius ? String(asset.coverageRadius / 1000) : "",
-    coverageType: asset.coverageType,
-    coverageAngle: asset.coverageAngle ? String(asset.coverageAngle) : "",
-    description: asset.description ?? "",
-    isPublic: asset.isPublic ?? true,
-    enterpriseId: asset.enterpriseId ?? "",
-  };
-}
-
-function rolesForCategory(category: DefenseAssetCategory): DefenseAsset["roles"] {
-  switch (category) {
-    case "detection":
-      return ["detect", "track"];
-    case "classification":
-      return ["classify"];
-    case "jamming":
-    case "spoofing":
-      return ["suppress"];
-    case "kinetic":
-    case "interceptor":
-      return ["destroy"];
-    case "passive-protection":
-    case "engineering-protection":
-      return ["protect"];
-    case "command-center":
-      return ["coordinate"];
-    case "early-warning":
-      return ["alert", "monitor"];
-    default:
-      return ["monitor"];
-  }
-}
-
-function placementTypeForCoverage(coverageType: DefenseAssetCoverageType): DefenseAsset["placementType"] {
-  if (coverageType === "polygon" || coverageType === "line") return "zone-object";
-  if (coverageType === "none") return "non-physical";
-  return "map-object";
-}
-
-function formToAssetInput(form: AssetFormState): DefenseAssetMutationInput {
-  const price = optionalNumber(form.pricePerUnitMln);
-  const coverageRadius = kmToMeters(form.coverageRadiusKm);
-  const maxEffectiveDistance = kmToMeters(form.maxEffectiveDistanceKm) ?? coverageRadius;
-  const recommendedLayerCodes = form.recommendedLayerCodes
-    .split(",")
-    .map((item) => item.trim().toUpperCase())
-    .filter(Boolean);
-
-  return {
-    id: form.id,
-    name: form.name.trim(),
-    description: form.description.trim() || undefined,
-    category: form.category,
-    roles: rolesForCategory(form.category),
-    protectionType: form.protectionType.trim() || undefined,
-    pricePerUnitMln: price ?? null,
-    currency: "RUB",
-    unitLabel: "шт",
-    recommendedLayerCodes,
-    compatibleLayerCodes: recommendedLayerCodes,
-    maxEffectiveDistance,
-    coverageType: form.coverageType,
-    coverageRadius,
-    coverageAngle: optionalNumber(form.coverageAngle),
-    deploymentType: form.coverageType === "none" ? "external" : "static",
-    placementType: placementTypeForCoverage(form.coverageType),
-    tags: recommendedLayerCodes,
-    mapCatalogGroupIds: [],
-    isPublic: form.isPublic,
-    enterpriseId: form.isPublic ? null : form.enterpriseId.trim() || null,
-  };
-}
 
 export function AssetLibraryManager({
   assets,
+  enterpriseId, previewAssets, onApplyPreview, onDiscardPreview,
   placedObjects,
   selectedAssetId,
   loading,
@@ -202,7 +87,7 @@ export function AssetLibraryManager({
     () => assets.find((asset) => asset.id === selectedAssetId) ?? assets[0] ?? null,
     [assets, selectedAssetId],
   );
-  const [form, setForm] = useState<AssetFormState>(() => (selectedAsset ? formFromAsset(selectedAsset) : emptyForm()));
+  const [form, setForm] = useState<AssetFormState>(() => (selectedAsset ? formFromAsset(selectedAsset) : emptyForm(enterpriseId)));
   const [saving, setSaving] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const usedAssetIds = useMemo(() => new Set(placedObjects.map((object) => object.assetId)), [placedObjects]);
@@ -210,7 +95,7 @@ export function AssetLibraryManager({
 
   const startCreate = () => {
     setMode("create");
-    setForm(emptyForm());
+    setForm(emptyForm(enterpriseId));
     setLocalError(null);
   };
 
@@ -238,9 +123,9 @@ export function AssetLibraryManager({
       onSelectAsset(asset.id);
       setMode("edit");
       setForm(formFromAsset(asset));
-      onMessage(`${asset.name} сохранено в библиотеке`);
-    } catch {
-      setLocalError("Не удалось сохранить карточку на сервере.");
+      onMessage(`${asset.name} сохранено в библиотеке. Проверьте обновление данных проекта.`);
+    } catch (error) {
+      setLocalError(error instanceof Error && !("status" in error) ? error.message : "Не удалось сохранить карточку на сервере. Проверьте источник и доступ к библиотеке.");
     } finally {
       setSaving(false);
     }
@@ -262,7 +147,7 @@ export function AssetLibraryManager({
         return;
       }
       setMode("closed");
-      setForm(emptyForm());
+      setForm(emptyForm(enterpriseId));
       onMessage(`${selectedAsset.name} удалено из библиотеки`);
     } catch {
       setLocalError("Не удалось удалить карточку на сервере.");
@@ -315,6 +200,17 @@ export function AssetLibraryManager({
       {error ? <p className={`${styles.prototypeNoticeWarning} mt-2`}>{error}</p> : null}
       {localError ? <p className={`${styles.prototypeNoticeDanger} mt-2`}>{localError}</p> : null}
 
+      {selectedAsset && <p className="mt-2 text-sm" data-testid="asset-provenance">{provenanceLabel(selectedAsset.fieldProvenance?.unitPriceMinor ?? selectedAsset.fieldProvenance?.pricePerUnitMln ?? selectedAsset.provenance)} · {assetPriceLabel(selectedAsset)}</p>}
+      {previewAssets && <section className="mt-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3" aria-label="Просмотр изменений каталога">
+        <h3 className="font-medium">Обновить данные проекта</h3>
+        <p className="text-sm">Изменения станут черновиком. Сохранённые версии и цены экземпляров сохранятся.</p>
+        {previewAssets.filter(asset=>JSON.stringify(asset)!==JSON.stringify(assets.find(item=>item.id===asset.id))).map(asset=>{
+          const before=assets.find(item=>item.id===asset.id);
+          return <div key={asset.id} className="border-t border-amber-200 pt-2 text-sm"><p>{before?.name ?? "Новая карточка"} → {asset.name}</p><p>{before ? assetPriceLabel(before) : "—"} → {assetPriceLabel(asset)}</p><p>{provenanceLabel(asset.provenance)}</p><details><summary className="min-h-11 cursor-pointer py-2">Изменённые поля карточки</summary><dl>{Object.keys(asset).filter(key=>JSON.stringify(asset[key as keyof DefenseAsset])!==JSON.stringify(before?.[key as keyof DefenseAsset])).map(key=><div key={key} className="my-2 break-words"><dt className="font-medium">{key}</dt><dd className="whitespace-pre-wrap break-all">{JSON.stringify(before?.[key as keyof DefenseAsset]) ?? "—"} → {JSON.stringify(asset[key as keyof DefenseAsset]) ?? "—"}</dd></div>)}</dl></details></div>;
+        })}
+        <div className="flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded border px-3" onClick={()=>{if(!onApplyPreview())setLocalError("Проект изменился. Запросите обновление каталога ещё раз.");}}>Применить к черновику</button><button type="button" className="min-h-11 rounded border px-3" onClick={onDiscardPreview}>Отменить обновление</button></div>
+      </section>}
+
       {mode !== "closed" ? (
         <div className={`${styles.prototypeFormCard} mt-3 grid gap-2 bg-slate-50 p-2`}>
           <div className="flex items-center justify-between gap-2">
@@ -336,12 +232,14 @@ export function AssetLibraryManager({
             className={styles.prototypeField}
             value={form.name}
             onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-            placeholder="Название"
+            aria-label="Название"
+              placeholder="Название"
           />
 
           <div className="grid grid-cols-2 gap-2">
             <select
               className={styles.prototypeSelect}
+              aria-label="Категория средства"
               value={form.category}
               onChange={(event) =>
                 setForm((current) => ({ ...current, category: event.target.value as DefenseAssetCategory }))
@@ -355,6 +253,7 @@ export function AssetLibraryManager({
             </select>
             <select
               className={styles.prototypeSelect}
+              aria-label="Тип покрытия"
               value={form.coverageType}
               onChange={(event) =>
                 setForm((current) => ({ ...current, coverageType: event.target.value as DefenseAssetCoverageType }))
@@ -373,21 +272,25 @@ export function AssetLibraryManager({
               className={styles.prototypeField}
               value={form.protectionType}
               onChange={(event) => setForm((current) => ({ ...current, protectionType: event.target.value }))}
+              aria-label="Тип защиты"
               placeholder="Тип защиты"
             />
             <input
               className={styles.prototypeField}
               value={form.recommendedLayerCodes}
               onChange={(event) => setForm((current) => ({ ...current, recommendedLayerCodes: event.target.value }))}
+              aria-label="Эшелоны: L2, L3"
               placeholder="Эшелоны: L2, L3"
             />
           </div>
 
+          {form.priceError && <p role="alert" className="text-sm text-red-700">{form.priceError}</p>}
           <div className="grid grid-cols-3 gap-2">
             <input
               className={styles.prototypeField}
               value={form.pricePerUnitMln}
-              onChange={(event) => setForm((current) => ({ ...current, pricePerUnitMln: event.target.value }))}
+              onChange={(event) => setForm((current) => ({ ...current, pricePerUnitMln: event.target.value, priceError: undefined, sourceQuality: current.sourceQuality === "demo" ? "demo" : "estimated" }))}
+              aria-label="млн ₽"
               placeholder="млн ₽"
               inputMode="decimal"
             />
@@ -395,6 +298,7 @@ export function AssetLibraryManager({
               className={styles.prototypeField}
               value={form.coverageRadiusKm}
               onChange={(event) => setForm((current) => ({ ...current, coverageRadiusKm: event.target.value }))}
+              aria-label="радиус, км"
               placeholder="радиус, км"
               inputMode="decimal"
             />
@@ -402,6 +306,7 @@ export function AssetLibraryManager({
               className={styles.prototypeField}
               value={form.coverageAngle}
               onChange={(event) => setForm((current) => ({ ...current, coverageAngle: event.target.value }))}
+              aria-label="угол"
               placeholder="угол"
               inputMode="decimal"
             />
@@ -411,7 +316,8 @@ export function AssetLibraryManager({
             className={styles.prototypeField}
             value={form.maxEffectiveDistanceKm}
             onChange={(event) => setForm((current) => ({ ...current, maxEffectiveDistanceKm: event.target.value }))}
-            placeholder="максимальная дальность, км"
+            aria-label="максимальная дальность, км"
+              placeholder="максимальная дальность, км"
             inputMode="decimal"
           />
 
@@ -419,8 +325,20 @@ export function AssetLibraryManager({
             className={`${styles.prototypeTextarea} min-h-16 resize-y`}
             value={form.description}
             onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-            placeholder="Описание"
+            aria-label="Описание"
+              placeholder="Описание"
           />
+
+          <fieldset className="space-y-2 rounded-lg border border-slate-200 p-3">
+            <legend className="px-1 text-sm font-medium">Источник карточки и цены</legend>
+            <label className="block text-sm">Качество данных<select aria-label="Качество данных" className={styles.prototypeSelect} value={form.sourceQuality} disabled={form.original?.provenance?.quality === "demo"} onChange={event=>setForm(current=>({...current,sourceQuality:event.target.value as AssetFormState["sourceQuality"]}))}><option value="unknown">Источник не указан</option><option value="estimated">Оценка</option><option value="confirmed">Подтверждено пользователем</option><option value="demo">Демонстрационные данные</option></select></label>
+            <label className="block text-sm">Описание источника<input className={styles.prototypeField} value={form.sourceLabel} onChange={event=>setForm(current=>({...current,sourceLabel:event.target.value}))}/></label>
+            <label className="block text-sm">Дата источника<input type="date" className={styles.prototypeField} value={form.sourceDate} onChange={event=>setForm(current=>({...current,sourceDate:event.target.value}))}/></label>
+            <label className="block text-sm">Ссылка на источник<input type="url" className={styles.prototypeField} value={form.sourceUrl} onChange={event=>setForm(current=>({...current,sourceUrl:event.target.value}))}/></label>
+            {form.sourceDocumentId && <p className="break-all text-sm">Документ: {form.sourceDocumentId} <button type="button" className="min-h-11 px-2 underline" onClick={()=>setForm(current=>({...current,sourceDocumentId:null}))}>Убрать ссылку</button></p>}
+            <p className="text-sm text-slate-600">Подтверждение означает проверку ответственным пользователем. Fortis не сертифицирует источник независимо. Для замены демонстрационных данных создайте карточку по данным заказчика.</p>
+          </fieldset>
+          {mode === "edit" && form.id && <AssetDocumentsPanel key={form.id} assetId={form.id} onSourceSelected={document=>setForm(current=>({...current,sourceDocumentId:document.id,sourceLabel:current.sourceLabel||document.name,sourceQuality:current.sourceQuality === "unknown" ? "estimated" : current.sourceQuality}))}/>}
 
           <label className={`${styles.prototypeInlineCard} text-xs text-slate-600`}>
             <span>Общий каталог</span>
@@ -436,6 +354,7 @@ export function AssetLibraryManager({
               className={styles.prototypeField}
               value={form.enterpriseId}
               onChange={(event) => setForm((current) => ({ ...current, enterpriseId: event.target.value }))}
+              aria-label="enterpriseId"
               placeholder="enterpriseId"
             />
           ) : null}
