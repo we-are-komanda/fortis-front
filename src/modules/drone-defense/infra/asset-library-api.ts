@@ -1,4 +1,4 @@
-import { buildApiV1Url, deleteApiJson, getApiJson, postApiJson, putApiJson } from "@/shared/lib/api-client";
+import { isRecord, FortisProtocolError, requireListItems, buildApiV1Url, deleteApiJson, getApiJson, postApiJson, putApiJson } from "@/shared/lib/api-client";
 import type {
   DefenseAsset,
   DefenseAssetCategory,
@@ -258,6 +258,7 @@ export function buildAssetLibraryUrl(options: FetchAssetLibraryOptions = {}) {
 }
 
 export function normalizeDefenseAssetPayload(payload: BackendAssetPayload): DefenseAsset {
+  if (!isRecord(payload) || typeof payload.id !== "string" || !payload.id.trim() || typeof payload.name !== "string" || !payload.name.trim()) throw new FortisProtocolError();
   const category = mapBackendCategory(stringValue(payload, "category"));
   const roles = (stringArrayValue(payload, "roles") ?? []).map(mapBackendRole);
   const coverageType = normalizeCoverageType(stringValue(payload, "coverageType", "coverage_type"));
@@ -353,7 +354,7 @@ export async function fetchAssetLibrary(options: FetchAssetLibraryOptions = {}) 
       offset: options.offset,
     },
   });
-  const items = Array.isArray(response) ? response : response.items ?? [];
+  const items = requireListItems<Record<string, unknown>>(response);
   return items.map(normalizeDefenseAssetPayload);
 }
 

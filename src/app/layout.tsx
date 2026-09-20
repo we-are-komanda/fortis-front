@@ -3,6 +3,8 @@ import { AntdRegistry } from "@ant-design/nextjs-registry";
 import { IBM_Plex_Mono, Manrope, Plus_Jakarta_Sans, Syne } from "next/font/google";
 import { ThemeProvider } from "@/shared/ui/theme-provider";
 import "./globals.css";
+import { IdentityBoundary } from "@/shared/ui/identity-boundary";
+import { RuntimeProvider } from "@/shared/ui/runtime-provider";
 
 const jakartaFont = Plus_Jakarta_Sans({
   variable: "--font-jakarta",
@@ -42,7 +44,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     >
       <body>
         <AntdRegistry>
-          <ThemeProvider>{children}</ThemeProvider>
+          <ThemeProvider><RuntimeProvider><IdentityBoundary>{children}</IdentityBoundary></RuntimeProvider></ThemeProvider>
         </AntdRegistry>
       </body>
     </html>

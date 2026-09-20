@@ -1,5 +1,6 @@
 "use client";
 
+import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
 import { useState } from "react";
 import { SaveOutlined } from "@ant-design/icons";
 import { Button, theme } from "antd";
@@ -11,13 +12,16 @@ function useVariantMeta() {
   const { activeVariantId, activeVariantName, saveStatus, overwriteActiveVariant } =
     useDefenseVariantsStore();
 
+  const accessError = useDefenseProjectStore((state) => state.accessError);
+  const syncStatus = useDefenseProjectStore((state) => state.syncStatus);
   const isDraft = !activeVariantId;
   const saving = saveStatus === "saving";
-  const label = isDraft ? "Черновик (не сохранён)" : activeVariantName;
-  const dotColor = isDraft ? token.colorWarning : token.colorSuccess;
+  const label = accessError ? "Проект недоступен" : saveStatus === "error" ? "Ошибка сохранения" : syncStatus === "unverified" ? "Черновик (не подтверждён)" : isDraft || syncStatus === "dirty" ? "Есть несохранённые изменения" : activeVariantName;
+  const dotColor = saveStatus === "error" ? token.colorError : isDraft || syncStatus !== "saved" ? token.colorWarning : token.colorSuccess;
 
   return {
     token,
+    accessError,
     activeVariantId,
     activeVariantName,
     saveStatus,
@@ -117,7 +121,7 @@ export function VariantSaveButton({
   iconOnly?: boolean;
   className?: string;
 }) {
-  const { activeVariantName, overwriteActiveVariant, isDraft, saving } = useVariantMeta();
+  const { activeVariantName, overwriteActiveVariant, isDraft, saving, accessError } = useVariantMeta();
   const [open, setOpen] = useState(false);
 
   const handleSave = () => {
@@ -135,7 +139,7 @@ export function VariantSaveButton({
           className={className}
           type="button"
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || Boolean(accessError)}
           title={
             isDraft
               ? "Сохранить карту как новый вариант"
@@ -146,7 +150,7 @@ export function VariantSaveButton({
           <SaveOutlined />
         </button>
       ) : (
-        <Button type="primary" onClick={handleSave} loading={saving}>
+        <Button type="primary" onClick={handleSave} loading={saving} disabled={Boolean(accessError)}>
           Сохранить
         </Button>
       )}
@@ -156,7 +160,7 @@ export function VariantSaveButton({
 }
 
 export function VariantSelector() {
-  const { saving } = useVariantMeta();
+  const { saving, accessError } = useVariantMeta();
   const [open, setOpen] = useState(false);
 
   return (
@@ -170,7 +174,7 @@ export function VariantSelector() {
     >
       <VariantStatusButton />
       <VariantSaveButton />
-      <Button size="small" onClick={() => setOpen(true)} disabled={saving}>
+      <Button size="small" onClick={() => setOpen(true)} disabled={saving || Boolean(accessError)}>
         Сохранить как…
       </Button>
       <VariantsModal open={open} onClose={() => setOpen(false)} />

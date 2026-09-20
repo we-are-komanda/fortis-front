@@ -1,28 +1,27 @@
-import { backendErrorResponse, backendFetch } from "@/modules/drone-defense/infra/backend-proxy";
+import { backendErrorResponse, forwardBackendRequest, readBackendJson, boundaryError } from "@/modules/drone-defense/infra/backend-proxy";
 
-const accessTokenCookie = "access-token";
+import { authCookie } from "@/shared/server/auth-cookie";
 
 type AuthResponse = {
   token?: string;
   user?: unknown;
 };
 
-function authCookie(token: string) {
-  return `${accessTokenCookie}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`;
-}
-
 export async function POST(request: Request) {
   const body = await request.text();
   try {
-    const data = (await backendFetch("/auth/login", { method: "POST", body })) as AuthResponse;
-    if (!data.token) {
-      return Response.json({ error: { code: "auth_error", message: "Backend did not return an access token" } }, { status: 502 });
+    const response = await forwardBackendRequest("/auth/login", { method: "POST", body, headers: { "content-type": "application/json" } });
+    const data = (await readBackendJson(response)) as AuthResponse;
+    if (!data || typeof data.token !== "string" || !data.token) {
+      return boundaryError(502, "protocol_error", "Backend did not return an access token", response.headers.get("x-request-id") ?? undefined);
     }
     return Response.json(
       { user: data.user },
       {
         headers: {
           "Set-Cookie": authCookie(data.token),
+          "cache-control": "no-store",
+          "x-request-id": response.headers.get("x-request-id")!,
         },
       },
     );

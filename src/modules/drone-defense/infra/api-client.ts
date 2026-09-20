@@ -1,5 +1,5 @@
 import { exportDefenseProjectJson } from "@/shared/lib/defense-project";
-import { readJson } from "@/shared/lib/api-client";
+import { readJson, isRecord, FortisProtocolError } from "@/shared/lib/api-client";
 import type { DefenseProject, VariantListResponse, VariantSummary } from "@/shared/types/defense-project";
 import type {
   Configuration,
@@ -18,24 +18,24 @@ type LayersQuery = {
 };
 
 async function readVariantJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
-  if (!response.ok) {
-    let message = `Запрос не выполнен (${response.status})`;
-    let code: string | undefined;
-    try {
-      const body = (await response.json()) as { error?: { code?: string; message?: string }; message?: string };
-      code = body?.error?.code;
-      if (body?.error?.message) message = body.error.message;
-      else if (body?.message) message = body.message;
-    } catch {
-      // Keep the generic message when the response body is not JSON.
-    }
-    if (response.status === 409 || code === "version_conflict") {
-      throw Object.assign(new Error(message), { status: 409, code: "version_conflict" });
-    }
-    throw Object.assign(new Error(message), { status: response.status, code });
-  }
-  return (await response.json()) as T;
+  const data = await readJson<T>(input, init);
+  if (!isRecord(data)) throw new FortisProtocolError();
+  return data;
+}
+
+export function validateProjectList(data: unknown) {
+  if (!isRecord(data) || !Array.isArray(data.items) || typeof data.totalItems !== "number" ||
+      !data.items.every((item) => isRecord(item) && typeof item.projectId === "string")) throw new FortisProtocolError();
+}
+
+export function validateProjectPayload(data: unknown) {
+  if (!isRecord(data) || typeof data.projectId !== "string" || data.schemaVersion !== 1 ||
+      !isRecord(data.baseObject) || !isRecord(data.baseObject.center) || !Array.isArray(data.layers) ||
+      !Array.isArray(data.assetLibrary) || !Array.isArray(data.placedObjects)) throw new FortisProtocolError();
+}
+
+export function validateVariantSummary(data: unknown) {
+  if (!isRecord(data) || typeof data.projectId !== "string" || typeof data.version !== "number") throw new FortisProtocolError();
 }
 
 export function fetchCatalog() {
@@ -72,12 +72,16 @@ export function recommendConfigurationRequest(configuration: Configuration, budg
   });
 }
 
-export function listVariants(): Promise<VariantListResponse> {
-  return readVariantJson<VariantListResponse>("/api/defense/projects");
+export async function listVariants(): Promise<VariantListResponse> {
+  const data = await readVariantJson<VariantListResponse>("/api/defense/projects");
+  validateProjectList(data);
+  return data;
 }
 
-export function loadVariant(id: string): Promise<DefenseProject> {
-  return readVariantJson<DefenseProject>(`/api/defense/projects/${encodeURIComponent(id)}`);
+export async function loadVariant(id: string, signal?: AbortSignal): Promise<DefenseProject> {
+  const data = await readVariantJson<DefenseProject>(`/api/defense/projects/${encodeURIComponent(id)}`, { signal });
+  validateProjectPayload(data);
+  return data;
 }
 
 function projectUpdatePayload(args: { name: string; project: DefenseProject }) {

@@ -41,12 +41,7 @@ Object.defineProperty(globalThis, "fetch", {
     const method = (init?.method ?? "GET").toUpperCase();
     fetchCalls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : undefined });
     const result = fetchHandler(method, url);
-    return {
-      ok: result.ok,
-      status: result.status,
-      json: async () => result.data,
-      text: async () => JSON.stringify(result.data),
-    };
+    return new Response(JSON.stringify(result.data), { status: result.status, headers: { "content-type": "application/json" } });
   },
   configurable: true,
   writable: true,

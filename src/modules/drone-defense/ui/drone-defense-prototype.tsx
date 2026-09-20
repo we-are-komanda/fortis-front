@@ -1,5 +1,7 @@
 "use client";
 
+import { useRuntimeMode } from "@/shared/ui/runtime-provider";
+import { shouldLoadBackendProject, useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -133,6 +135,12 @@ function layerWizardStoreDraft(draft: LayerWizardDraft) {
 
 export function DroneDefensePrototype() {
   const searchParams = useSearchParams();
+  const runtimeMode = useRuntimeMode();
+  const backendProjectId = searchParams.get("projectId") ?? searchParams.get("project");
+  const loadVariant = useDefenseVariantsStore((state) => state.loadVariant);
+  const variantError = useDefenseVariantsStore((state) => state.error);
+  const syncStatus = useDefenseProjectStore((state) => state.syncStatus);
+  const protectedObjectsError = useDefenseProjectStore((state) => state.protectedObjectsError);
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [isCatalogTrayOpen, setIsCatalogTrayOpen] = useState(true);
@@ -198,15 +206,29 @@ export function DroneDefensePrototype() {
   } = useDefenseProjectStore();
 
   useEffect(() => {
-    void init();
-  }, [init]);
+    if (runtimeMode) void init(runtimeMode);
+  }, [init, runtimeMode]);
 
   useEffect(() => {
-    restoreProjectFromLocalStorage();
+    if (!runtimeMode) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    useDefenseProjectStore.getState().setRuntimeMode(runtimeMode);
     restoreMapViewFromLocalStorage();
-    void refreshAssetLibrary({ isPublic: true, limit: 100 });
-    void refreshProtectedObjects({ limit: 100 });
-  }, [refreshAssetLibrary, refreshProtectedObjects, restoreMapViewFromLocalStorage, restoreProjectFromLocalStorage]);
+    void (async () => {
+      if (backendProjectId && runtimeMode === "workspace") {
+        if (!shouldLoadBackendProject(backendProjectId)) return;
+        await loadVariant(backendProjectId, controller.signal);
+        if (cancelled || useDefenseVariantsStore.getState().loadStatus === "error") return;
+      } else {
+        restoreProjectFromLocalStorage();
+      }
+      if (cancelled) return;
+      void refreshAssetLibrary({ isPublic: true, limit: 100 });
+      void refreshProtectedObjects({ limit: 100 });
+    })();
+    return () => { cancelled = true; controller.abort(); };
+  }, [runtimeMode, backendProjectId, loadVariant, refreshAssetLibrary, refreshProtectedObjects, restoreMapViewFromLocalStorage, restoreProjectFromLocalStorage]);
   const selectedProtectedObject = useMemo(
     () =>
       protectedObjects.find((item) => item.id === project.baseObject.id) ?? {
@@ -820,6 +842,9 @@ export function DroneDefensePrototype() {
 
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
+      {(variantError || protectedObjectsError) && <div role="alert">{variantError ?? protectedObjectsError}</div>}
+      {syncStatus === "unverified" && <div role="status">Локальный черновик — серверное состояние не подтверждено.</div>}
+
       {activeView === "gis" ? (
         <section
           data-sidebar-state={isCatalogTrayOpen ? "open" : "closed"}
@@ -982,9 +1007,9 @@ export function DroneDefensePrototype() {
                 selectBaseObject(nextObject);
                 setLastPlacementMessage(`${nextObject.name}: выбран объект защиты`);
               }}
-              hexCells={studioPreviewData.hexCells}
-              threatRoutes={studioPreviewData.threatRoutes}
-              layers={layers}
+              hexCells={runtimeMode === "demo" ? studioPreviewData.hexCells : []}
+              threatRoutes={runtimeMode === "demo" ? studioPreviewData.threatRoutes : []}
+              layers={runtimeMode === "demo" ? layers : null}
               configuration={mapConfiguration}
               catalog={catalog}
               mapLayers={projectMapLayers}

@@ -1,24 +1,9 @@
-import { backendFetch, backendErrorResponse } from "@/modules/drone-defense/infra/backend-proxy";
-
+import { forwardBackendJson } from "@/modules/drone-defense/infra/backend-proxy";
+import { validateProjectList, validateVariantSummary } from "@/modules/drone-defense/infra/api-client";
 export const dynamic = "force-dynamic";
-
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const qs = searchParams.toString();
-  try {
-    const data = await backendFetch(`/projects${qs ? `?${qs}` : ""}`, undefined, { request });
-    return Response.json(data);
-  } catch (err) {
-    return backendErrorResponse(err);
-  }
+export function GET(request: Request) {
+  return forwardBackendJson(`/projects${new URL(request.url).search}`, request, validateProjectList);
 }
-
-export async function POST(request: Request) {
-  const body = await request.text();
-  try {
-    const data = await backendFetch(`/projects`, { method: "POST", body }, { request });
-    return Response.json(data);
-  } catch (err) {
-    return backendErrorResponse(err);
-  }
+export function POST(request: Request) {
+  return forwardBackendJson("/projects", request, validateVariantSummary);
 }

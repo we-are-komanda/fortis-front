@@ -3,11 +3,6 @@
 import { create } from "zustand";
 import { buildCatalogPlacement, buildScenarioConfiguration, hexCells, threatRoutes } from "@/modules/drone-defense/infra/mock-defense-data";
 import { fetchCatalog, fetchFacilities, fetchLayers } from "@/modules/drone-defense/infra/api-client";
-import {
-  getCatalog as localGetCatalog,
-  getFacilities as localGetFacilities,
-  getLayers as localGetLayers,
-} from "@/modules/drone-defense/infra/mock-defense-repository";
 import type {
   Configuration,
   DefenseCatalogResponse,
@@ -35,24 +30,14 @@ type StudioState = {
   selectPlacement: (placementId: string | null) => void;
   placeAssetInSlot: (args: { groupId: string; layerId: DefenseLayerId; slotId: string; mapRef: { lon: number; lat: number } }) => Promise<boolean>;
   removePlacement: (placementId: string) => Promise<void>;
-  init: () => Promise<void>;
+  runtimeMode: "workspace" | "demo";
+  init: (mode?: "workspace" | "demo") => Promise<void>;
   setView: (view: StudioView) => void;
   setFacilityId: (facilityId: string) => Promise<void>;
   setScenarioId: (scenarioId: DefenseScenarioId) => Promise<void>;
   upsertLocalPlacement: (placement: Placement) => Promise<void>;
   moveLocalPlacement: (args: { placementId: string; x: number; z: number }) => Promise<void>;
   removeLocalPlacement: (placementId: string) => Promise<void>;
-};
-
-const useLocalRuntime = process.env.NEXT_PUBLIC_DEFENSE_RUNTIME !== "api";
-
-const runtime = {
-  fetchCatalog: useLocalRuntime ? localGetCatalog : fetchCatalog,
-  fetchFacilities: useLocalRuntime ? localGetFacilities : fetchFacilities,
-  fetchLayers: useLocalRuntime
-    ? (args: { facilityId: string; scenarioId: DefenseScenarioId; configuration?: Configuration }) =>
-        localGetLayers(args.facilityId, args.scenarioId, args.configuration)
-    : fetchLayers,
 };
 
 function buildConfiguration(
@@ -68,17 +53,19 @@ async function loadScenarioPack(
   scenarioId: DefenseScenarioId,
   localPlacementsByScenario: Partial<Record<DefenseScenarioId, Placement[]>>,
 ) {
+  if (useDefenseStudioStore.getState().runtimeMode !== "demo") throw new Error("Demo-only operation");
   const configuration = buildConfiguration(facilityId, scenarioId, localPlacementsByScenario);
-  const layers = await runtime.fetchLayers({ facilityId, scenarioId, configuration });
+  const layers = await fetchLayers({ facilityId, scenarioId });
 
   return { configuration, layers };
 }
 
 export const useDefenseStudioStore = create<StudioState>((set, get) => ({
   view: "gis",
-  facilityId: "facility-alpha",
+  facilityId: "",
+  runtimeMode: "workspace",
   scenarioId: "baseline",
-  configuration: buildScenarioConfiguration("facility-alpha", "baseline"),
+  configuration: { facilityId: "", scenarioId: "baseline", placements: [] },
   loading: false,
   error: null,
   catalog: null,
@@ -86,10 +73,15 @@ export const useDefenseStudioStore = create<StudioState>((set, get) => ({
   layers: null,
   localPlacementsByScenario: {},
   selectedPlacementId: null,
-  init: async () => {
+  init: async (runtimeMode = "workspace") => {
+    set({ runtimeMode });
+    if (runtimeMode !== "demo") {
+      set({ catalog: null, facilities: [], layers: null, facilityId: "", configuration: { facilityId: "", scenarioId: "baseline", placements: [] }, loading: false, error: null });
+      return;
+    }
     set({ loading: true, error: null });
     try {
-      const [catalog, facilities] = await Promise.all([runtime.fetchCatalog(), runtime.fetchFacilities()]);
+      const [catalog, facilities] = await Promise.all([fetchCatalog(), fetchFacilities()]);
       const facilityId = facilities[0]?.id ?? "facility-alpha";
       const scenarioId = get().scenarioId;
       const localPlacementsByScenario = get().localPlacementsByScenario;

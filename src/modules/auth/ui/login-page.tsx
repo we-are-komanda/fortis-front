@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { safeNextPath } from "@/shared/lib/safe-next";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { setAuthenticatedIdentity } from "@/shared/lib/session-state";
+import "@/shared/lib/identity";
 
 export function LoginPage() {
   const router = useRouter();
@@ -27,7 +30,8 @@ export function LoginPage() {
         const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
         throw new Error(body?.error?.message ?? "Не удалось войти");
       }
-      router.replace(next.startsWith("/") ? next : "/workspace");
+      setAuthenticatedIdentity(null);
+      router.replace(safeNextPath(next));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось войти");

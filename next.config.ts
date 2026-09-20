@@ -7,11 +7,6 @@ const frontendRoot = dirname(fileURLToPath(import.meta.url));
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH?.trim() || "";
 const isStaticExport = process.env.NEXT_STATIC_EXPORT === "true";
 const distDir = process.env.FORTIS_NEXT_DIST_DIR?.trim() || undefined;
-const fortisApiBaseUrl =
-  process.env.FORTIS_API_BASE_URL?.trim() ||
-  process.env.NEXT_PUBLIC_FORTIS_API_BASE_URL?.trim() ||
-  "http://localhost:8090";
-
 const nextConfig: NextConfig = {
   distDir,
   turbopack: {
@@ -46,57 +41,6 @@ const nextConfig: NextConfig = {
         ],
       },
     ];
-  },
-  async rewrites() {
-    if (isStaticExport) return [];
-    return {
-      beforeFiles: [
-        {
-          source: "/api/v1/enterprises",
-          destination: `${fortisApiBaseUrl}/api/v1/enterprises`,
-        },
-        {
-          source: "/api/v1/assets",
-          destination: `${fortisApiBaseUrl}/api/v1/assets`,
-        },
-        {
-          source: "/api/v1/assets/get",
-          destination: `${fortisApiBaseUrl}/api/v1/assets/get`,
-        },
-        {
-          source: "/api/v1/assets/update",
-          destination: `${fortisApiBaseUrl}/api/v1/assets/update`,
-        },
-        {
-          source: "/api/v1/assets/delete",
-          destination: `${fortisApiBaseUrl}/api/v1/assets/delete`,
-        },
-        {
-          source: "/api/v1/assets/documents/:path*",
-          destination: `${fortisApiBaseUrl}/api/v1/assets/documents/:path*`,
-        },
-        {
-          source: "/api/v1/projects/budget",
-          destination: `${fortisApiBaseUrl}/api/v1/projects/budget`,
-        },
-        {
-          source: "/api/v1/projects/cost",
-          destination: `${fortisApiBaseUrl}/api/v1/projects/cost`,
-        },
-        {
-          source: "/api/v1/projects/budget/check",
-          destination: `${fortisApiBaseUrl}/api/v1/projects/budget/check`,
-        },
-        {
-          source: "/api/v1/projects/report",
-          destination: `${fortisApiBaseUrl}/api/v1/projects/report`,
-        },
-        {
-          source: "/api/v1/projects/compare",
-          destination: `${fortisApiBaseUrl}/api/v1/projects/compare`,
-        },
-      ],
-    };
   },
 };
 

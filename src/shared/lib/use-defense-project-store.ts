@@ -1,8 +1,10 @@
 "use client";
 
 import { create } from "zustand";
+import { sessionGeneration } from "./session-state";
 import {
   createDefaultDefenseProject,
+  createWorkspaceDefenseProject,
   createRingLayer,
   applyAssetQuantityDraftsToProject,
   canEditLayer,
@@ -48,8 +50,13 @@ export const FORTIS_DEFENSE_PROJECT_STORAGE_KEY = "fortis-defense-project";
 export const MAX_DEFENSE_PROJECT_LAYERS = 20;
 
 type DefenseProjectState = {
+  identityId: string | null;
+  accessError: string | null;
   project: DefenseProject;
   hydrated: boolean;
+  runtimeMode: "workspace" | "demo";
+  syncStatus: "saved" | "dirty" | "unverified";
+  setRuntimeMode: (mode: "workspace" | "demo") => void;
   budgetApplied: boolean;
   assetLibraryLoading: boolean;
   assetLibraryError: string | null;
@@ -118,14 +125,23 @@ function canUseLocalStorage() {
   return typeof globalThis.localStorage !== "undefined";
 }
 
+export function projectStorageKey(userId: string) { return `${FORTIS_DEFENSE_PROJECT_STORAGE_KEY}:user:${encodeURIComponent(userId)}`; }
+
+function storageKey() {
+ const { runtimeMode, identityId } = useDefenseProjectStore.getState();
+ return runtimeMode === "demo" ? `${FORTIS_DEFENSE_PROJECT_STORAGE_KEY}:demo` : identityId ? projectStorageKey(identityId) : null;
+}
+
 function persist(project: DefenseProject) {
-  if (!canUseLocalStorage()) return;
-  globalThis.localStorage.setItem(FORTIS_DEFENSE_PROJECT_STORAGE_KEY, exportDefenseProjectJson(project));
+  const key = storageKey();
+  if (!canUseLocalStorage() || !key) return;
+  globalThis.localStorage.setItem(key, exportDefenseProjectJson(project));
 }
 
 function readProject(): DefenseProject | null {
-  if (!canUseLocalStorage()) return null;
-  const raw = globalThis.localStorage.getItem(FORTIS_DEFENSE_PROJECT_STORAGE_KEY);
+  const key = storageKey();
+  if (!canUseLocalStorage() || !key) return null;
+  const raw = globalThis.localStorage.getItem(key);
   if (!raw) return null;
   try {
     return importDefenseProjectJson(raw);
@@ -188,18 +204,28 @@ function mergeProtectedObjectOptions(
 
 function applyProject(project: DefenseProject, set: (state: Partial<DefenseProjectState>) => void) {
   persist(project);
-  set({ project, budgetApplied: false, ...syncSelection(project) });
+  set({ project, hydrated: true, syncStatus: useDefenseProjectStore.getState().accessError ? "unverified" : "dirty", budgetApplied: false, ...syncSelection(project) });
 }
 
 export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => {
-  const initialProject = createDefaultDefenseProject();
+  const initialProject = createWorkspaceDefenseProject();
   return {
+    identityId: null,
+    accessError: null,
     project: initialProject,
     hydrated: false,
+    runtimeMode: "workspace",
+    syncStatus: "unverified",
+    setRuntimeMode: (runtimeMode) => {
+      set({ runtimeMode });
+      if (runtimeMode === "demo" && !get().hydrated && get().project.source !== "backend") {
+        set({ project: createDefaultDefenseProject(), hydrated: true, syncStatus: "unverified" });
+      }
+    },
     budgetApplied: false,
     assetLibraryLoading: false,
     assetLibraryError: null,
-    protectedObjects: [createFallbackProtectedObjectOption(initialProject.baseObject)],
+    protectedObjects: [],
     protectedObjectsLoading: false,
     protectedObjectsError: null,
     ...syncSelection(initialProject),
@@ -450,6 +476,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     duplicatePlacedObject: (objectId) => applyProject(duplicatePlacedObjectInProject(get().project, objectId), set),
     validateObjectPlacement: (assetId, layerId, coordinates) => validateObjectPlacement(get().project, assetId, layerId, coordinates),
     loadPresetProject: (presetId) => {
+      if (get().runtimeMode !== "demo") return;
       const legacy = loadPresetIntoConfiguration(presetId);
       const project = {
         ...legacySelectedConfigurationToProject(legacy),
@@ -467,82 +494,34 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       set({ budgetApplied: true });
     },
     refreshAssetLibrary: async (options = {}) => {
+      const generation = sessionGeneration();
       const { loader, ...query } = options;
+      const startingProject = get().project;
       set({ assetLibraryLoading: true, assetLibraryError: null });
-      const localCatalogMessage =
-        "Не удалось загрузить библиотеку с сервера, используется локальный каталог.";
       try {
-        const assets = loader ? await loader() : await fetchAssetLibrary(query);
-        // Backend may answer 200 with an empty list (offline / unseeded). Don't
-        // blank the UI: keep whatever library is already loaded, and only when
-        // it is empty (first load, nothing to fall back to) seed the bundled
-        // local catalog so the map stays usable.
-        if (assets.length === 0) {
-          const current = get().project;
-          const shouldSeed = current.assetLibrary.length === 0;
-          if (shouldSeed) {
-            const seeded = { ...current, assetLibrary: defenseAssetLibrary, updatedAt: new Date().toISOString() };
-            persist(seeded);
-            set({
-              project: seeded,
-              budgetApplied: false,
-              assetLibraryLoading: false,
-              assetLibraryError: localCatalogMessage,
-              ...syncSelection(seeded),
-            });
-          } else {
-            set({ assetLibraryLoading: false, assetLibraryError: localCatalogMessage });
-          }
-          return;
-        }
-        const project = {
-          ...get().project,
-          assetLibrary: assets,
-          updatedAt: new Date().toISOString(),
-        };
-        persist(project);
-        set({
-          project,
-          budgetApplied: false,
-          assetLibraryLoading: false,
-          assetLibraryError: null,
-          ...syncSelection(project),
-        });
-      } catch {
-        // Backend unreachable: same local-catalog fallback. Only seed when empty,
-        // to avoid clobbering a library the user already loaded or edited.
-        const current = get().project;
-        const shouldSeed = current.assetLibrary.length === 0;
-        const project = shouldSeed
-          ? { ...current, assetLibrary: defenseAssetLibrary, updatedAt: new Date().toISOString() }
-          : current;
-        if (shouldSeed) {
-          persist(project);
-        }
-        set({
-          project,
-          assetLibraryLoading: false,
-          assetLibraryError: localCatalogMessage,
-          ...(shouldSeed ? syncSelection(project) : {}),
-        });
+        const assets = loader ? await loader() : get().runtimeMode === "demo" ? defenseAssetLibrary : await fetchAssetLibrary(query);
+        if (generation !== sessionGeneration()) return;
+        // A refresh for a previous project must not replace the newly opened project.
+        if (get().project !== startingProject) { set({ assetLibraryLoading: false }); return; }
+        const project = { ...startingProject, assetLibrary: assets };
+        set({ project, assetLibraryLoading: false, assetLibraryError: null, ...syncSelection(project) });
+      } catch (error) {
+        if (generation !== sessionGeneration()) return;
+        set({ assetLibraryLoading: false, assetLibraryError: error instanceof Error ? error.message : "Не удалось загрузить библиотеку с сервера." });
       }
     },
     refreshProtectedObjects: async (options = {}) => {
+      const generation = sessionGeneration();
       const { loader, ...query } = options;
       set({ protectedObjectsLoading: true, protectedObjectsError: null });
       try {
-        const objects = loader ? await loader() : await fetchEnterprises(query);
-        set({
-          protectedObjects: mergeProtectedObjectOptions(get().project.baseObject, objects, get().protectedObjects),
-          protectedObjectsLoading: false,
-          protectedObjectsError: null,
-        });
-      } catch {
-        set({
-          protectedObjects: mergeProtectedObjectOptions(get().project.baseObject, [], get().protectedObjects),
-          protectedObjectsLoading: false,
-          protectedObjectsError: "Не удалось загрузить объекты защиты с сервера, используется локальный объект.",
-        });
+        const objects = loader ? await loader() : get().runtimeMode === "demo"
+          ? [createFallbackProtectedObjectOption(get().project.baseObject)] : await fetchEnterprises(query);
+        if (generation !== sessionGeneration()) return;
+        set({ protectedObjects: objects, protectedObjectsLoading: false, protectedObjectsError: null });
+      } catch (error) {
+        if (generation !== sessionGeneration()) return;
+        set({ protectedObjectsLoading: false, protectedObjectsError: error instanceof Error ? error.message : "Не удалось загрузить объекты защиты с сервера." });
       }
     },
     upsertAssetInLibrary: (asset) => {
@@ -578,7 +557,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       return { ok: true };
     },
     clearProject: () => {
-      const project = createDefaultDefenseProject();
+      const project = get().runtimeMode === "demo" ? createDefaultDefenseProject() : { ...initialProject, updatedAt: new Date().toISOString() };
       persist(project);
       set({
         project,
@@ -592,9 +571,13 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     },
     saveProjectToLocalStorage: () => persist(get().project),
     restoreProjectFromLocalStorage: () => {
-      const project = readProject() ?? readLegacyConfigurationProject() ?? createDefaultDefenseProject();
+      if (get().hydrated) return;
+      // Demo uses its own initial data; a workspace recovery never changes the server-selected mode.
+      const restored = get().runtimeMode === "workspace" ? readProject() : readProject() ?? readLegacyConfigurationProject();
+      const project = restored ?? get().project;
       set({
         project,
+        syncStatus: "unverified",
         hydrated: true,
         budgetApplied: false,
         protectedObjects: mergeProtectedObjectOptions(project.baseObject, [], get().protectedObjects),

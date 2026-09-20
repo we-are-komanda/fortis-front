@@ -1,3 +1,4 @@
+import { demoOnlyResponse, demoHeaders } from "@/modules/drone-defense/infra/backend-proxy";
 import { getLayers } from "@/modules/drone-defense/infra/mock-defense-repository";
 import type { DefenseScenarioId } from "@/shared/types/drone-defense";
 
@@ -8,6 +9,8 @@ export const dynamic = "force-dynamic";
 const scenarioIds: DefenseScenarioId[] = ["baseline", "balanced", "reinforced"];
 
 export async function GET(request: Request) {
+  const denied = demoOnlyResponse(request);
+  if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const facilityId = searchParams.get("facilityId");
   const scenarioId = searchParams.get("scenarioId");
@@ -20,5 +23,5 @@ export async function GET(request: Request) {
   }
 
   const layers = await getLayers(facilityId, scenarioId as DefenseScenarioId);
-  return Response.json(layers);
+  return Response.json(layers, { headers: demoHeaders });
 }

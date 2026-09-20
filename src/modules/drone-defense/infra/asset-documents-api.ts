@@ -1,4 +1,4 @@
-import { buildApiV1Url, deleteApiJson, getApiJson, postApiJson } from "@/shared/lib/api-client";
+import { requireListItems, buildApiV1Url, deleteApiJson, getApiJson, postApiJson } from "@/shared/lib/api-client";
 
 export type AssetDocument = {
   id: string;
@@ -40,7 +40,7 @@ export async function listAssetDocuments(assetId: string) {
   const response = await getApiJson<AssetDocumentListResponse>(`${documentsPath}/list`, {
     query: { assetId },
   });
-  return response.items ?? [];
+  return requireListItems<AssetDocument>(response);
 }
 
 export function createAssetDocument(input: CreateAssetDocumentInput) {

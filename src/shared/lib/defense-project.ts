@@ -610,6 +610,12 @@ export function createDefaultDefenseProject(): DefenseProject {
   };
 }
 
+export function createWorkspaceDefenseProject(): DefenseProject {
+  const project = createDefaultDefenseProject();
+  return { ...project, assetLibrary: [], layers: [], activeLayerId: undefined,
+    baseObject: { ...project.baseObject, id: "local-draft", name: "Новый объект защиты" } };
+}
+
 export function recenterProject(project: DefenseProject, center: Coordinates): DefenseProject {
   const recenteredLayers = project.layers.map((layer) => {
     if (layer.geometry.type === "ring" || layer.geometry.type === "circle") {
@@ -1136,25 +1142,17 @@ function assetToCalculatorAssetId(asset: DefenseAssetLibraryItem): string {
 }
 
 function normalizeProjectAssetLibrary(assetLibrary: DefenseProject["assetLibrary"]): DefenseProject["assetLibrary"] {
-  const importedById = new Map((assetLibrary ?? []).map((asset) => [asset.id, asset]));
-  const canonicalIds = new Set(defenseAssetLibrary.map((asset) => asset.id));
-  const canonicalAssets = defenseAssetLibrary.map((asset) => ({
-    ...(importedById.get(asset.id) ?? {}),
+  if (!Array.isArray(assetLibrary)) throw new Error("Invalid project asset library");
+  return assetLibrary.map((asset) => ({
     ...asset,
+    coverageType: asset.coverageType ?? "none",
+    currency: asset.currency ?? "RUB",
+    roles: asset.roles ?? [],
+    pricePerUnitMln: asset.pricePerUnitMln ?? null,
+    unitLabel: asset.unitLabel ?? "шт",
+    deploymentType: asset.deploymentType ?? "external",
+    placementType: asset.placementType ?? "non-physical",
   }));
-  const customAssets = (assetLibrary ?? [])
-    .filter((asset) => !canonicalIds.has(asset.id))
-    .map((asset) => ({
-      ...asset,
-      coverageType: asset.coverageType ?? "none",
-      currency: asset.currency ?? "RUB",
-      roles: asset.roles ?? [],
-      pricePerUnitMln: asset.pricePerUnitMln ?? null,
-      unitLabel: asset.unitLabel ?? "шт",
-      deploymentType: asset.deploymentType ?? "external",
-      placementType: asset.placementType ?? "non-physical",
-  }));
-  return [...canonicalAssets, ...customAssets];
 }
 
 function normalizeLayerGeometry(

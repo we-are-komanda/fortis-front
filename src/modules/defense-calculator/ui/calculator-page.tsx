@@ -1,5 +1,6 @@
 "use client";
 
+import { useRuntimeMode } from "@/shared/ui/runtime-provider";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
@@ -64,6 +65,9 @@ function calculatorAssetIdForProjectAsset(project: DefenseProject, assetId: stri
 }
 
 export function CalculatorPage() {
+  const runtimeMode = useRuntimeMode();
+  const syncStatus = useDefenseProjectStore((state) => state.syncStatus);
+  const [backendError, setBackendError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("configure");
   const [budgetMln, setBudgetMln] = useState(9300);
   const [backendCost, setBackendCost] = useState<BackendCostCalculation | null>(null);
@@ -77,11 +81,13 @@ export function CalculatorPage() {
   } = useDefenseProjectStore();
 
   useEffect(() => {
+    if (!runtimeMode) return;
+    useDefenseProjectStore.getState().setRuntimeMode(runtimeMode);
     restoreProjectFromLocalStorage();
-  }, [restoreProjectFromLocalStorage]);
+  }, [runtimeMode, restoreProjectFromLocalStorage]);
 
   useEffect(() => {
-    if (project.source !== "backend" || typeof project.version !== "number") {
+    if (!runtimeMode || runtimeMode === "demo" || syncStatus === "unverified" || project.source !== "backend" || typeof project.version !== "number") {
       Promise.resolve().then(() => {
         setBackendCost(null);
         setBackendReport(null);
@@ -103,16 +109,17 @@ export function CalculatorPage() {
         setBackendReport(report);
         setBackendStatus("idle");
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return;
         setBackendCost(null);
         setBackendReport(null);
         setBackendStatus("error");
+        setBackendError(error instanceof Error ? error.message : "Не удалось получить серверный расчёт.");
       });
     return () => {
       cancelled = true;
     };
-  }, [project.projectId, project.source, project.version]);
+  }, [runtimeMode, syncStatus, project.projectId, project.source, project.version]);
 
   const calculatorAssets = useMemo(() => projectAssetsToCalculatorAssets(project.assetLibrary), [project.assetLibrary]);
 
@@ -155,6 +162,14 @@ export function CalculatorPage() {
   const layerSummaries = useMemo(() => calculateLayerSummaries(project), [project]);
   const isConfigurationEmpty = positionsCount === 0;
   const totalMln = backendCost?.totalMln ?? estimate.totalMln;
+
+  if (!runtimeMode) return <div role="status">Загрузка рабочего режима…</div>;
+  if (runtimeMode === "workspace" && project.source === "backend" && (syncStatus === "unverified" || backendStatus !== "idle" || !backendCost || !backendReport)) {
+    return <div role={backendStatus === "error" ? "alert" : "status"} className="p-6">
+      <Link href="/prototype">← Вернуться к проекту</Link>
+      <p>{syncStatus === "unverified" ? "Локальный снимок не подтверждён сервером. Загрузите сохранённый проект для серверного расчёта." : backendStatus === "error" ? backendError : "Загрузка серверного расчёта…"}</p>
+    </div>;
+  }
 
   return (
     <div className="font-(family-name:--font-manrope) min-h-screen bg-[#eef3f8] text-slate-800">

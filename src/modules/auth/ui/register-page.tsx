@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { setAuthenticatedIdentity } from "@/shared/lib/session-state";
+import "@/shared/lib/identity";
 
 export function RegisterPage() {
   const router = useRouter();
@@ -26,6 +28,7 @@ export function RegisterPage() {
         const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
         throw new Error(body?.error?.message ?? "Не удалось создать аккаунт");
       }
+      setAuthenticatedIdentity(null);
       router.replace("/workspace");
       router.refresh();
     } catch (err) {

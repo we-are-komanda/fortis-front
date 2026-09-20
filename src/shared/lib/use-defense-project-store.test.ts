@@ -1,15 +1,16 @@
 // Run: npx tsx src/shared/lib/use-defense-project-store.test.ts
 
 import {
-  FORTIS_DEFENSE_PROJECT_STORAGE_KEY,
+  projectStorageKey,
   useDefenseProjectStore,
 } from "@/shared/lib/use-defense-project-store";
-import { projectToCalculatorConfiguration } from "@/shared/lib/defense-project";
+import { createDefaultDefenseProject, projectToCalculatorConfiguration } from "@/shared/lib/defense-project";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+const FORTIS_DEFENSE_PROJECT_STORAGE_KEY = projectStorageKey("test-user");
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
   value: {
@@ -22,8 +23,10 @@ Object.defineProperty(globalThis, "localStorage", {
 });
 
 storage.clear();
-useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
+useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 
+useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 const initial = useDefenseProjectStore.getState().project;
 const l1 = initial.layers.find((layer) => layer.code === "L1");
 const l2 = initial.layers.find((layer) => layer.code === "L2");
@@ -63,7 +66,7 @@ useDefenseProjectStore.getState().duplicatePlacedObject(placed[0].id);
 assert(useDefenseProjectStore.getState().project.placedObjects.length === 2, "duplicatePlacedObject must add a second object");
 
 const saved = storage.get(FORTIS_DEFENSE_PROJECT_STORAGE_KEY);
-useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
+useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
 if (saved) storage.set(FORTIS_DEFENSE_PROJECT_STORAGE_KEY, saved);
 useDefenseProjectStore.getState().restoreProjectFromLocalStorage();
 assert(useDefenseProjectStore.getState().hydrated, "restore must mark store hydrated");
@@ -102,7 +105,9 @@ assert(useDefenseProjectStore.getState().project.placedObjects.length === 1, "bu
 assert(useDefenseProjectStore.getState().project.placedObjects[0].quantity === 1, "budget draft object must keep selected quantity");
 assert(useDefenseProjectStore.getState().project.placedObjects[0].status === "planned", "budget draft object must be planned");
 
+useDefenseProjectStore.setState({ runtimeMode: "demo" });
 useDefenseProjectStore.getState().loadPresetProject("nak");
+useDefenseProjectStore.setState({ runtimeMode: "workspace" });
 const presetObjects = useDefenseProjectStore.getState().project.placedObjects;
 const presetRadar = presetObjects.find((object) => object.assetId === "mobile-radar");
 assert(presetObjects.length > 0, "loadPresetProject must create map-visible draft objects");
@@ -113,6 +118,7 @@ assert(
 );
 
 useDefenseProjectStore.getState().clearProject();
+useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 useDefenseProjectStore.getState().selectLayer(l2.id);
 useDefenseProjectStore.getState().placeObject("mobile-radar", l2.id, { lat: 55.44, lng: 37.1 });
 
@@ -251,6 +257,7 @@ for (let index = 0; index < 30; index += 1) {
 assert(useDefenseProjectStore.getState().project.layers.length === 20, "createLayer must cap project layers at 20");
 
 useDefenseProjectStore.getState().clearProject();
+useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 useDefenseProjectStore.getState().setBaseObjectCenter({ lat: 56.8389, lng: 60.5945 });
 const recenteredProject = useDefenseProjectStore.getState().project;
 const recenteredL2 = recenteredProject.layers.find((layer) => layer.code === "L2");
@@ -262,7 +269,8 @@ assert(
 
 // ── budgetApplied flag (item 7) ──────────────────────────────────────────────
 storage.clear();
-useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
+useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 
 {
   const s = useDefenseProjectStore.getState();
@@ -287,6 +295,7 @@ useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
   // clearProject resets the flag.
   useDefenseProjectStore.getState().applyBudgetSelection([{ assetId: firstAssetId, included: true }]);
   useDefenseProjectStore.getState().clearProject();
+useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
   assert(
     useDefenseProjectStore.getState().budgetApplied === false,
     "clearProject must reset budgetApplied to false",
@@ -296,7 +305,7 @@ useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
   useDefenseProjectStore.getState().applyBudgetSelection([{ assetId: firstAssetId, included: true }]);
   assert(useDefenseProjectStore.getState().budgetApplied === true, "precondition: flag true before restore");
   useDefenseProjectStore.getState().saveProjectToLocalStorage();
-  useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
+  useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
   useDefenseProjectStore.getState().restoreProjectFromLocalStorage();
   assert(
     useDefenseProjectStore.getState().budgetApplied === false,
@@ -305,7 +314,8 @@ useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
 }
 
 // Selection-only actions must NOT reset the flag.
-useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
+useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 {
   const st = useDefenseProjectStore.getState();
   const aId = st.project.assetLibrary[0]?.id;
@@ -324,7 +334,8 @@ console.log("budgetApplied flag: OK");
 async function runAssetLibraryRefreshContracts() {
   // ── asset library refresh (FRT-48) ─────────────────────────────────────────
   storage.clear();
-  useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
+  useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+  useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 
   const st = useDefenseProjectStore.getState();
   const l2 = st.project.layers.find((layer) => layer.code === "L2");
@@ -363,17 +374,13 @@ async function runAssetLibraryRefreshContracts() {
     "refreshAssetLibrary must keep placed objects even when their asset id is missing in fresh library",
   );
 
-  const beforeEmpty = useDefenseProjectStore.getState().project.assetLibrary;
   await useDefenseProjectStore.getState().refreshAssetLibrary({
     loader: async () => [],
   });
   const emptyState = useDefenseProjectStore.getState();
   assert(emptyState.assetLibraryLoading === false, "empty asset refresh must clear loading");
-  assert(
-    emptyState.assetLibraryError?.includes("локальный каталог"),
-    "empty asset refresh must expose a soft fallback message instead of blanking the UI",
-  );
-  assert(emptyState.project.assetLibrary === beforeEmpty, "empty asset refresh must keep the existing/local asset library");
+  assert(emptyState.assetLibraryError === null, "legitimate empty is not an error");
+  assert(emptyState.project.assetLibrary.length === 0, "empty response must remain empty");
 
   const beforeFailure = useDefenseProjectStore.getState().project.assetLibrary;
   await useDefenseProjectStore.getState().refreshAssetLibrary({
@@ -384,8 +391,8 @@ async function runAssetLibraryRefreshContracts() {
   const failed = useDefenseProjectStore.getState();
   assert(failed.assetLibraryLoading === false, "refreshAssetLibrary must clear loading after failure");
   assert(
-    failed.assetLibraryError?.includes("локальный каталог"),
-    "refreshAssetLibrary must expose a soft fallback message after failure",
+    failed.assetLibraryError?.includes("backend unavailable"),
+    "refreshAssetLibrary must expose the failure without seeding",
   );
   assert(failed.project.assetLibrary === beforeFailure, "failed refresh must keep the existing/local asset library");
   assert(failed.project.placedObjects.length === 1, "failed refresh must not delete placed objects");
@@ -393,13 +400,10 @@ async function runAssetLibraryRefreshContracts() {
 
 async function runProtectedObjectContracts() {
   storage.clear();
-  useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
+  useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+  useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 
-  const initialBaseObject = useDefenseProjectStore.getState().project.baseObject;
-  assert(
-    useDefenseProjectStore.getState().protectedObjects.some((item) => item.id === initialBaseObject.id),
-    "store must expose current local baseObject as a fallback option before backend sync",
-  );
+  assert(useDefenseProjectStore.getState().protectedObjects.length === 0, "no synthetic enterprise before server load");
 
   await useDefenseProjectStore.getState().refreshProtectedObjects({
     loader: async () => [
@@ -436,8 +440,8 @@ async function runProtectedObjectContracts() {
   });
   const emptyResponseState = useDefenseProjectStore.getState();
   assert(
-    emptyResponseState.protectedObjects.some((item) => item.id === selectedProject.baseObject.id),
-    "empty protected object response must keep current baseObject option so UI still works",
+    emptyResponseState.protectedObjects.length === 0,
+    "empty enterprise response must remain empty",
   );
 
   await useDefenseProjectStore.getState().refreshProtectedObjects({
@@ -448,12 +452,12 @@ async function runProtectedObjectContracts() {
   const failed = useDefenseProjectStore.getState();
   assert(failed.protectedObjectsLoading === false, "refreshProtectedObjects must clear loading after failure");
   assert(
-    failed.protectedObjectsError?.includes("локальный"),
-    "refreshProtectedObjects must expose a soft fallback message after backend failure",
+    failed.protectedObjectsError?.includes("backend unavailable"),
+    "refreshProtectedObjects must expose backend failure",
   );
   assert(
-    failed.protectedObjects.some((item) => item.id === selectedProject.baseObject.id),
-    "failed protected object refresh must keep current local/base object option",
+    failed.protectedObjects.length === 0,
+    "failed refresh must not add a synthetic enterprise",
   );
 }
 

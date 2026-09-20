@@ -6,7 +6,7 @@ import { Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { compareBackendProjects, type BackendProjectCompare } from "@/modules/defense-calculator/infra/backend-project-api";
 import { fetchEnterprises } from "@/modules/drone-defense/infra/enterprise-api";
 import { useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
-import { createDefaultDefenseProject, setProjectBaseObject } from "@/shared/lib/defense-project";
+import { createWorkspaceDefenseProject, setProjectBaseObject } from "@/shared/lib/defense-project";
 import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
 import type { ProtectedObjectOption } from "@/shared/types/defense-project";
 
@@ -58,13 +58,13 @@ export function ProjectWorkspacePage() {
   const filteredVariants = useMemo(() => {
     if (!selectedEnterpriseId) return variants;
     const scoped = variants.filter((item) => item.enterpriseId === selectedEnterpriseId);
-    return scoped.length > 0 ? scoped : variants;
+    return scoped;
   }, [selectedEnterpriseId, variants]);
 
   async function handleCreateProject() {
     if (!selectedEnterprise) return;
     setWorkspaceError(null);
-    const baseProject = setProjectBaseObject(createDefaultDefenseProject(), selectedEnterprise);
+    const baseProject = setProjectBaseObject(createWorkspaceDefenseProject(), selectedEnterprise);
     replaceProject({
       ...baseProject,
       enterpriseId: selectedEnterprise.enterpriseId,
@@ -77,7 +77,7 @@ export function ProjectWorkspacePage() {
       setWorkspaceError(state.error);
       return;
     }
-    router.push("/prototype");
+    router.push(`/prototype?projectId=${encodeURIComponent(state.activeVariantId ?? "")}`);
   }
 
   async function handleOpenProject(projectId: string) {
@@ -88,7 +88,7 @@ export function ProjectWorkspacePage() {
       setWorkspaceError(state.error);
       return;
     }
-    router.push("/prototype");
+    router.push(`/prototype?projectId=${encodeURIComponent(state.activeVariantId ?? "")}`);
   }
 
   async function handleCompare() {
