@@ -11,7 +11,11 @@ import {
   type VariantListQuery,
 } from "@/modules/drone-defense/infra/api-client";
 import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
-import { businessContent, classifySaveVerification, type SaveAttempt } from "@/shared/lib/project-save-state";
+import { businessContent, classifySaveVerification, savedProjectRef, type SaveAttempt } from "@/shared/lib/project-save-state";
+import { getBackendBudgetConfig } from "@/modules/defense-calculator/infra/backend-project-api";
+import { formatBudgetMinor } from "@/shared/lib/budget-projection";
+import { isRecord } from "@/shared/lib/api-client";
+import type { BudgetConfig } from "@/shared/types/finance";
 import { readProjectDraft, type ProjectDraft } from "@/shared/lib/project-draft-storage";
 import type { DefenseProject, VariantSummary } from "@/shared/types/defense-project";
 
@@ -39,6 +43,7 @@ type VariantsState = {
   fetchVariants: (query?: VariantListQuery | null) => Promise<void>;
   saveAsNewVariant: (name: string, proposedProject?: DefenseProject) => Promise<VariantSummary | null>;
   overwriteActiveVariant: () => Promise<void>;
+  updateBudget: (config?: BudgetConfig) => Promise<boolean>;
   loadVariant: (id: string, signal?: AbortSignal) => Promise<DefenseProject | null>;
   deleteVariant: (id: string) => Promise<void>;
   checkRecoveryDraft: () => Promise<void>;
@@ -52,6 +57,12 @@ function accessFailure(err: unknown, projectId: string) {
 }
 
 function message(err: unknown): string {
+  const body = (err as { body?: unknown })?.body;
+  const details = isRecord(body) && isRecord(body.error) && isRecord(body.error.details) ? body.error.details : null;
+  if (details && (details.projectedSpentMinor === null || typeof details.projectedSpentMinor === "string") &&
+      (details.projectedRemainingMinor === null || typeof details.projectedRemainingMinor === "string")) {
+    try { return `${err instanceof Error ? err.message : "Бюджет не позволяет сохранить изменение."} Расход: ${formatBudgetMinor(details.projectedSpentMinor)}. Остаток: ${formatBudgetMinor(details.projectedRemainingMinor)}.`; } catch { /* Keep the server's safe message if details are malformed. */ }
+  }
   return err instanceof Error ? err.message : "Операция не удалась";
 }
 
@@ -172,6 +183,10 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
     const identityGeneration = sessionGeneration();
     const projectState = useDefenseProjectStore.getState();
     if (projectState.accessError && !proposedProject) return null;
+    if (projectState.saveAttempt?.kind === "budget") {
+      set({ error: "Сначала завершите или явно отмените сохранение бюджета текущего проекта." });
+      return null;
+    }
     const startingProject = projectState.project;
     const project = proposedProject ?? startingProject;
     if (get().saveStatus === "saving") return null;
@@ -188,7 +203,7 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
     const pendingAttempt = proposedProject ? get().workspaceCreateAttempt : projectState.saveAttempt;
     const attempt = pendingAttempt?.kind === "create" && (!proposedProject || (pendingAttempt.name === name && businessContent(pendingAttempt.project) === businessContent(project)))
       ? pendingAttempt
-      : prepareProjectSave("create", name, project, projectState.businessRevision);
+      : prepareProjectSave("create", name, project, projectState.businessRevision, proposedProject ? undefined : savedProjectRef(projectState.savedProject) ?? undefined);
     if (proposedProject) set({ workspaceCreateAttempt: attempt });
     else projectState.setSaveAttempt(attempt);
     try {
@@ -221,7 +236,63 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
     }
   },
 
+  updateBudget: async (config) => {
+    const identityGeneration = sessionGeneration();
+    const state = useDefenseProjectStore.getState();
+    const saved = state.savedProject;
+    if (state.accessError || !savedProjectRef(saved) || !saved || saved.projectId !== state.project.projectId || saved.version !== state.project.version || get().saveStatus === "saving") return false;
+    const pending = state.saveAttempt;
+    if (pending && pending.kind !== "budget") {
+      set({ error: "Сначала завершите или явно отмените сохранение текущего проекта." });
+      return false;
+    }
+    if (!pending && !config) return false;
+    const attempt: SaveAttempt = pending ?? { ...prepareProjectSave("update", saved.projectName, saved, state.businessRevision), kind: "budget", body: JSON.stringify({ version: saved.version, ...config }) };
+    const requested = JSON.parse(attempt.body) as BudgetConfig;
+    set({ saveStatus: "saving", error: null, conflictState: null, requestId: null });
+    try {
+      if (attempt.verificationRequired) {
+        const server = await apiLoadVariant(attempt.project.projectId);
+        const budget = await getBackendBudgetConfig(server.projectId, server.version!);
+        if (identityGeneration !== sessionGeneration()) return false;
+        const latest = useDefenseProjectStore.getState();
+        if (latest.project.projectId !== attempt.project.projectId || latest.project.enterpriseId !== attempt.project.enterpriseId || latest.project.version !== attempt.project.version) { set({ saveStatus: "error", error: "Контекст проекта изменился; результат бюджета требует повторного открытия проекта." }); return false; }
+        if (server.projectId !== attempt.project.projectId || server.enterpriseId !== attempt.project.enterpriseId || businessContent(server) !== businessContent(attempt.project) || server.version! < attempt.project.version!) {
+          set({ saveStatus: "error", error: "Проект на сервере изменился. Откройте актуальную версию перед изменением бюджета.", conflictState: { projectId: attempt.project.projectId, message: "Версия изменилась" } }); return false;
+        }
+        if (server.version! > attempt.project.version!) {
+          if (budget.config.budgetMode !== requested.budgetMode || budget.config.budgetLimitMinor !== requested.budgetLimitMinor) {
+            set({ saveStatus: "error", error: "Бюджет на сервере изменился. Откройте актуальную версию.", conflictState: { projectId: server.projectId, message: "Бюджет изменился" } }); return false;
+          }
+          latest.recordSavedProject(attempt.project, server);
+          useDefenseProjectStore.setState({ budgetProjection: budget });
+          set({ saveStatus: "idle" });
+          return true;
+        }
+      }
+      useDefenseProjectStore.getState().setSaveAttempt({ ...attempt, verificationRequired: false });
+      const response = await sendProjectSaveAttempt(attempt);
+      if (identityGeneration !== sessionGeneration()) return false;
+      const latest = useDefenseProjectStore.getState();
+      if (latest.project.projectId !== attempt.project.projectId || latest.project.enterpriseId !== attempt.project.enterpriseId || latest.project.version !== attempt.project.version) { set({ saveStatus: "error", error: "Контекст проекта изменился во время сохранения бюджета." }); return false; }
+      latest.recordSavedProject(attempt.project, response.snapshot!.project);
+      useDefenseProjectStore.setState({ budgetProjection: response.budget! });
+      set({ saveStatus: "idle", requestId: null });
+      return true;
+    } catch (err) {
+      if (identityGeneration !== sessionGeneration()) return false;
+      const latest = useDefenseProjectStore.getState();
+      if (latest.project.projectId !== attempt.project.projectId || latest.project.enterpriseId !== attempt.project.enterpriseId) { set({ saveStatus: "idle" }); return false; }
+      accessFailure(err, attempt.project.projectId);
+      if (isAmbiguous(err)) latest.setSaveAttempt({ ...attempt, verificationRequired: true });
+      else if (![401, 403, 404].includes(statusCode(err) ?? 0)) latest.setSaveAttempt(null);
+      set({ saveStatus: "error", error: message(err), requestId: requestId(err), conflictState: statusCode(err) === 409 ? { projectId: attempt.project.projectId, message: message(err) } : null });
+      return false;
+    }
+  },
+
   overwriteActiveVariant: async () => {
+    if (useDefenseProjectStore.getState().saveAttempt?.kind === "budget") { await get().updateBudget(); return; }
     const identityGeneration = sessionGeneration();
     if (useDefenseProjectStore.getState().accessError) return;
     const { activeVariantId, activeVariantName } = get();

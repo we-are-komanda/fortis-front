@@ -1,6 +1,23 @@
 export type DataQuality = "confirmed" | "estimated" | "demo";
 export type Money = { currency: "RUB"; minor: string };
 export type ProjectRef = { projectId: string; projectVersion: number };
+export type BudgetConfig =
+  | { budgetMode: "unlimited"; budgetLimitMinor: null }
+  | { budgetMode: "limited"; budgetLimitMinor: string };
+export type BudgetProjection = {
+  identity: CalculationIdentity;
+  config: BudgetConfig;
+  spentMinor: string | null;
+  remainingMinor: string | null;
+  status: "within_limit" | "exceeded" | "unlimited" | "indeterminate";
+};
+export type BudgetCheckResponse = {
+  basedOn: ProjectRef;
+  status: "allowed" | "blocked";
+  reasonCode: "within_budget" | "unlimited" | "budget_exceeded" | "price_unknown" | "non_increasing_overage";
+  projectedSpentMinor: string | null;
+  projectedRemainingMinor: string | null;
+};
 export type CalculationIdentity = ProjectRef & {
   calculationVersion: string;
   inputDataVersions: Record<string, string>;

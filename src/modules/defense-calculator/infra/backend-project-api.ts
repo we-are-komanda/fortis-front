@@ -1,6 +1,7 @@
 import { readDataProvenance } from "@/shared/lib/data-provenance";
 import type { CostProjection } from "@/shared/types/finance";
-import { FortisProtocolError, isRecord, getApiJson, postApiJson, putApiJson } from "@/shared/lib/api-client";
+import { readBudgetProjection, readBudgetCheck } from "@/shared/lib/budget-projection";
+import { FortisProtocolError, isRecord, getApiJson, postApiJson } from "@/shared/lib/api-client";
 
 export type BackendEstimateLine = {
   objectId: string;
@@ -20,21 +21,6 @@ export type BackendCostCalculation = {
   byEchelon: Array<{ echelonId: string; echelonName: string; lines: BackendEstimateLine[]; echelonTotalMln: number }>;
   byType: Array<{ typeId: string; typeName: string; lines: BackendEstimateLine[]; typeTotalMln: number }>;
   byObject: BackendEstimateLine[];
-};
-
-export type BackendBudgetConfig = {
-  budgetMode: "limited" | "unlimited";
-  budgetAmountMln: number;
-  projectId: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type BackendBudgetCheck = {
-  fits: boolean;
-  remainingMln: number;
-  requiredMln: number;
-  budgetMode: "limited" | "unlimited";
 };
 
 export type BackendProjectReport = {
@@ -63,12 +49,9 @@ export type BackendProjectCompare = {
   };
 };
 
-export function getBackendBudgetConfig(projectId: string) {
-  return getApiJson<BackendBudgetConfig>("/projects/budget", { query: { id: projectId } });
-}
-
-export function updateBackendBudgetConfig(projectId: string, body: Pick<BackendBudgetConfig, "budgetMode" | "budgetAmountMln">) {
-  return putApiJson<BackendBudgetConfig>("/projects/budget", { query: { id: projectId }, body });
+export async function getBackendBudgetConfig(projectId: string, projectVersion: number, signal?: AbortSignal) {
+  if (!Number.isSafeInteger(projectVersion) || projectVersion < 1) throw new FortisProtocolError();
+  return readBudgetProjection(await getApiJson<unknown>("/projects/budget", { query: { projectId, projectVersion }, signal }), projectId, projectVersion);
 }
 
 export async function getBackendProjectCost(projectId: string, projectVersion: number, signal?: AbortSignal): Promise<CostProjection> {
@@ -128,11 +111,11 @@ export async function getBackendProjectCost(projectId: string, projectVersion: n
   return value as CostProjection;
 }
 
-export function checkBackendProjectBudget(
+export async function checkBackendProjectBudget(
   projectId: string,
-  body: { assetId: string; quantity: number; echelonId: string },
+  body: { version: number; projectJson: string },
 ) {
-  return postApiJson<BackendBudgetCheck>("/projects/budget/check", { query: { id: projectId }, body });
+  return readBudgetCheck(await postApiJson<unknown>("/projects/budget/check", { query: { projectId }, body }), projectId, body.version);
 }
 
 export function getBackendProjectReport(projectId: string, options: { hideCost?: boolean } = {}) {

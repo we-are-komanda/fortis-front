@@ -96,3 +96,20 @@ test("recovery names count Unicode code points at the 120 character boundary", (
     assert.equal(readProjectDraft(scope, true).ok, length === 120);
   }
 });
+
+test("budget recovery preserves the frozen version and exact config alongside newer draft edits", () => {
+  const saved = { ...record.draft, source: "backend" as const, version: 7 };
+  const body = JSON.stringify({ version: 7, budgetMode: "limited", budgetLimitMinor: "0" });
+  const attempt = { kind: "budget" as const, name: "Saved", project: saved, businessRevision: 2, body, startedAt: "2026-09-20T00:00:00Z", verificationRequired: true };
+  const stored = { ...record, savedProject: saved, draft: { ...saved, projectName: "Newer edit" }, attempt };
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: () => JSON.stringify(stored) } });
+  const loaded = readProjectDraft(scope, true);
+  assert.ok(loaded.ok && loaded.value);
+  assert.equal(loaded.value.draft.projectName, "Newer edit");
+  assert.equal(loaded.value.attempt?.body, body);
+  assert.equal(loaded.value.attempt?.verificationRequired, true);
+  for (const invalidBody of [{ version: 8, budgetMode: "limited", budgetLimitMinor: "0" }, { version: 7, budgetMode: "unlimited", budgetLimitMinor: "0" }, { version: 7, budgetMode: "limited", budgetLimitMinor: "-1" }]) {
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: () => JSON.stringify({ ...stored, attempt: { ...attempt, body: JSON.stringify(invalidBody) } }) } });
+    assert.equal(readProjectDraft(scope, true).ok, false);
+  }
+});

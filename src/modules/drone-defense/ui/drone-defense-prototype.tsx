@@ -3,6 +3,7 @@
 import { formatMinorRub } from "@/shared/lib/cost-projection";
 
 import { useProjectCost } from "@/modules/defense-calculator/domain/use-project-cost";
+import { ProjectBudgetPanel } from "@/modules/defense-calculator/ui/project-budget-panel";
 import { useRuntimeMode } from "@/shared/ui/runtime-provider";
 import { shouldLoadBackendProject, useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { useSearchParams } from "next/navigation";
@@ -851,6 +852,7 @@ export function DroneDefensePrototype() {
       {(variantError || protectedObjectsError) && <div role="alert">{variantError ?? protectedObjectsError}</div>}
       {syncStatus === "unverified" && <div role="status">Локальный черновик — серверное состояние не подтверждено.</div>}
       {financial.error ? <div role="alert" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm">{financial.error} {financial.saved && <button type="button" className="min-h-11 px-3 underline" onClick={financial.retry}>Повторить расчёт</button>}</div> : <div role="status" className="border-b border-slate-200 bg-white px-4 py-1 text-xs">{financial.blocked ? "Смета ожидает проверки доступа" : !financial.cost ? "Смета загружается" : financial.saved ? `Смета сохранённой версии ${project.version}` : "Черновая смета — изменения не сохранены"}</div>}
+      {runtimeMode === "workspace" && !financial.blocked && <details className="max-h-72 shrink-0 overflow-y-auto border-b border-slate-200 bg-white"><summary className="min-h-11 cursor-pointer px-4 py-3 text-sm font-semibold">Бюджет и расходы</summary><ProjectBudgetPanel compact /></details>}
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       {activeView === "gis" ? (
@@ -1092,8 +1094,7 @@ export function DroneDefensePrototype() {
                 profile={selectedMogObject.compoundProfile}
                 onPreviewChange={(patch) => updatePlacedObject(selectedMogObject.id, patch)}
                 onSave={(patch) => {
-                  updatePlacedObject(selectedMogObject.id, patch);
-                  selectObject(null);
+                  if (updatePlacedObject(selectedMogObject.id, patch)) selectObject(null);
                 }}
                 onCancel={(patch) => {
                   updatePlacedObject(selectedMogObject.id, patch);

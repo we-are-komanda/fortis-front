@@ -3,7 +3,7 @@ import type { ProjectRef } from "@/shared/types/finance";
 
 export type SaveStatus = "loading" | "saved" | "dirty" | "saving" | "offline_draft" | "conflict" | "error";
 export type SaveAttempt = {
-  kind: "create" | "update";
+  kind: "create" | "update" | "budget";
   project: DefenseProject;
   name: string;
   body: string;
