@@ -8,4 +8,8 @@ export function setAuthenticatedIdentity(userId: string | null) {
   useSessionStore.setState({ userId, invalid: userId === null, generation: state.generation + 1 });
 }
 
+export function beginSessionVerification() {
+  useSessionStore.setState({ userId: null, invalid: false, generation: sessionGeneration() + 1 });
+}
+
 export function sessionGeneration() { return useSessionStore.getState().generation; }

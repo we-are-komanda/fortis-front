@@ -4,7 +4,7 @@ import Link from "next/link";
 import { safeNextPath } from "@/shared/lib/safe-next";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { setAuthenticatedIdentity } from "@/shared/lib/session-state";
+import { beginSessionVerification } from "@/shared/lib/session-state";
 import "@/shared/lib/identity";
 
 export function LoginPage() {
@@ -30,7 +30,7 @@ export function LoginPage() {
         const body = (await response.json().catch(() => null)) as { error?: { message?: string } } | null;
         throw new Error(body?.error?.message ?? "Не удалось войти");
       }
-      setAuthenticatedIdentity(null);
+      beginSessionVerification();
       router.replace(safeNextPath(next));
       router.refresh();
     } catch (err) {

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { compareBackendProjects, type BackendProjectCompare } from "@/modules/defense-calculator/infra/backend-project-api";
-import { fetchEnterprises, getEnterprise } from "@/modules/drone-defense/infra/enterprise-api";
+import { fetchEnterprisePage, getEnterprise } from "@/modules/drone-defense/infra/enterprise-api";
 import { useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { createWorkspaceDefenseProject, setProjectBaseObject } from "@/shared/lib/defense-project";
 import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
@@ -13,13 +13,15 @@ import { readProjectDraft, type ProjectDraft } from "@/shared/lib/project-draft-
 import type { ProtectedObjectOption } from "@/shared/types/defense-project";
 
 type PendingTransition = { kind: "create"; enterprise: ProtectedObjectOption } | { kind: "open"; projectId: string } | { kind: "enterprise"; enterpriseId: string };
+const pageSize = 50;
 
 export function ProjectWorkspacePage() {
   const router = useRouter();
   const [enterprises, setEnterprises] = useState<ProtectedObjectOption[]>([]);
-  const [enterpriseStatus, setEnterpriseStatus] = useState<"idle" | "loading" | "error">("loading");
+  const [enterpriseStatus, setEnterpriseStatus] = useState<"idle" | "loading" | "error" | "forbidden">("loading");
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [selectedEnterpriseId, setSelectedEnterpriseId] = useState<string | null>(null);
+  const [pageOffset, setPageOffset] = useState(0);
   const [newProjectName, setNewProjectName] = useState("Новая конфигурация");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [compareA, setCompareA] = useState("");
@@ -35,9 +37,8 @@ export function ProjectWorkspacePage() {
   const [recoveryScopeEnterpriseId, setRecoveryScopeEnterpriseId] = useState<string | null>(null);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
 
-  const { variants, listStatus, saveStatus, error, fetchVariants, loadVariant, saveAsNewVariant, overwriteActiveVariant } =
+  const { variants, listStatus, listQuery, totalItems, listError, listForbidden, saveStatus, loadStatus, error, fetchVariants, loadVariant, saveAsNewVariant, overwriteActiveVariant } =
     useDefenseVariantsStore();
-  const replaceProject = useDefenseProjectStore((state) => state.replaceProject);
   const identityId = useDefenseProjectStore((state) => state.identityId);
   const localDraftsEnabled = useDefenseProjectStore((state) => state.localDraftsEnabled);
   const projectSyncStatus = useDefenseProjectStore((state) => state.syncStatus);
@@ -46,28 +47,59 @@ export function ProjectWorkspacePage() {
 
   useEffect(() => {
     let cancelled = false;
+    const selectionKey = identityId ? `fortis:workspace:enterprise:${encodeURIComponent(identityId)}` : null;
     Promise.resolve()
-      .then(() => {
+      .then(async () => {
         if (cancelled) return [];
         setEnterpriseStatus("loading");
-        return fetchEnterprises({ limit: 100 });
+        setEnterprises([]);
+        setPageOffset(0);
+        compareGeneration.current++;
+        setCompareA("");
+        setCompareB("");
+        setCompareResult(null);
+        setCompareLoading(false);
+        void fetchVariants(null);
+        const items: ProtectedObjectOption[] = [];
+        let total = 0;
+        do {
+          const page = await fetchEnterprisePage({ limit: 100, offset: items.length });
+          if (cancelled) return [];
+          if (!page.items.length && items.length < page.totalItems) throw new Error("Неполный список предприятий");
+          items.push(...page.items);
+          total = page.totalItems;
+        } while (items.length < total);
+        return items;
       })
       .then((items) => {
         if (cancelled) return;
+        let remembered: string | null = null;
+        try { remembered = selectionKey ? sessionStorage.getItem(selectionKey) : null; } catch { /* Selection persistence is optional. */ }
         setEnterprises(items);
-        setSelectedEnterpriseId((current) => items.some((item) => item.enterpriseId === current)
-          ? current : items[0]?.enterpriseId ?? null);
+        setSelectedEnterpriseId((current) => {
+          const selected = items.some((item) => item.enterpriseId === current) ? current
+            : items.some((item) => item.enterpriseId === remembered) ? remembered : items[0]?.enterpriseId ?? null;
+          return selected;
+        });
         setEnterpriseStatus("idle");
       })
-      .catch(() => {
+      .catch((cause: unknown) => {
         if (cancelled) return;
-        setEnterpriseStatus("error");
+        setEnterprises([]);
+        setEnterpriseStatus((cause as { status?: number })?.status === 403 ? "forbidden" : "error");
       });
-    void fetchVariants();
     return () => {
       cancelled = true;
     };
-  }, [fetchVariants, refreshVersion]);
+  }, [fetchVariants, identityId, refreshVersion]);
+
+  useEffect(() => {
+    if (enterpriseStatus !== "idle" || !selectedEnterpriseId || !enterprises.some((item) => item.enterpriseId === selectedEnterpriseId)) return;
+    if (identityId) {
+      try { sessionStorage.setItem(`fortis:workspace:enterprise:${encodeURIComponent(identityId)}`, selectedEnterpriseId); } catch { /* Selection persistence is optional. */ }
+    }
+    void fetchVariants({ enterpriseId: selectedEnterpriseId, limit: pageSize, offset: pageOffset });
+  }, [enterpriseStatus, enterprises, fetchVariants, identityId, pageOffset, selectedEnterpriseId]);
 
   useEffect(() => {
     if (enterpriseStatus !== "idle" || !identityId || !localDraftsEnabled || !selectedEnterpriseId || !enterprises.some((item) => item.enterpriseId === selectedEnterpriseId)) return;
@@ -95,40 +127,47 @@ export function ProjectWorkspacePage() {
   );
 
   const filteredVariants = useMemo(() => {
-    if (!selectedEnterprise) return [];
+    if (!selectedEnterprise || listQuery?.enterpriseId !== selectedEnterpriseId || listQuery?.offset !== pageOffset) return [];
     const scoped = variants.filter((item) => item.enterpriseId === selectedEnterpriseId);
     return scoped;
-  }, [selectedEnterprise, selectedEnterpriseId, variants]);
+  }, [selectedEnterprise, selectedEnterpriseId, listQuery, pageOffset, variants]);
 
-  function createProject(enterprise: ProtectedObjectOption) {
-    setWorkspaceError(null);
-    const baseProject = setProjectBaseObject(createWorkspaceDefenseProject(), enterprise);
-    useDefenseProjectStore.setState({ accessError: null });
-    useDefenseVariantsStore.setState({ activeVariantId: null, activeVariantName: null, conflictState: null });
-    replaceProject({
-      ...baseProject,
-      enterpriseId: enterprise.enterpriseId,
-      projectName: newProjectName.trim() || "Новая конфигурация",
-      source: "custom",
-    });
-    void finishCreate(newProjectName.trim() || "Новая конфигурация");
+  const validName = [...newProjectName.trim()].length >= 1 && [...newProjectName.trim()].length <= 120;
+  const currentList = Boolean(selectedEnterprise && listQuery?.enterpriseId === selectedEnterpriseId && listQuery.offset === pageOffset);
+
+  function changePage(offset: number) {
+    compareGeneration.current++;
+    setCompareA("");
+    setCompareB("");
+    setCompareResult(null);
+    setCompareLoading(false);
+    setPageOffset(offset);
   }
 
-  async function finishCreate(name: string) {
-    await saveAsNewVariant(name);
+  async function createProject(enterprise: ProtectedObjectOption) {
+    const name = newProjectName.trim();
+    if (!name || [...name].length > 120 || saveStatus === "saving") return;
+    setWorkspaceError(null);
+    const baseProject = setProjectBaseObject(createWorkspaceDefenseProject(), enterprise);
+    const summary = await saveAsNewVariant(name, {
+      ...baseProject,
+      enterpriseId: enterprise.enterpriseId,
+      projectName: name,
+      source: "custom",
+    });
     const state = useDefenseVariantsStore.getState();
-    if (state.saveStatus !== "idle" || state.activeVariantId === null || useDefenseProjectStore.getState().syncStatus !== "saved") {
+    if (!summary || useDefenseProjectStore.getState().project.projectId !== summary.projectId || useDefenseProjectStore.getState().syncStatus !== "saved") {
       setWorkspaceError(state.error);
       return;
     }
-    router.push(`/prototype?projectId=${encodeURIComponent(state.activeVariantId ?? "")}`);
+    router.push(`/prototype?projectId=${encodeURIComponent(summary.projectId)}`);
   }
 
   async function finishOpenProject(projectId: string) {
     setWorkspaceError(null);
-    await loadVariant(projectId);
+    const loaded = await loadVariant(projectId);
     const state = useDefenseVariantsStore.getState();
-    if (state.error || state.activeVariantId !== projectId || state.loadStatus !== "idle") {
+    if (!loaded || useDefenseProjectStore.getState().project.projectId !== projectId || state.loadStatus !== "idle") {
       setWorkspaceError(state.error);
       return;
     }
@@ -144,19 +183,21 @@ export function ProjectWorkspacePage() {
     setRecoveryDraft(null);
     setRecoveryError(null);
     setWorkspaceError(null);
+    setPageOffset(0);
     setSelectedEnterpriseId(enterpriseId);
   }
 
   function requestTransition(target: PendingTransition) {
     if (target.kind === "enterprise" && target.enterpriseId === selectedEnterpriseId) return;
-    if (target.kind === "open" && useDefenseVariantsStore.getState().activeVariantId === target.projectId) {
+    const current = useDefenseProjectStore.getState();
+    if (target.kind === "open" && current.project.projectId === target.projectId && useDefenseVariantsStore.getState().activeVariantId === target.projectId && !current.accessError && current.syncStatus === "dirty") {
       router.push(`/prototype?projectId=${encodeURIComponent(target.projectId)}`);
       return;
     }
     const project = useDefenseProjectStore.getState().project;
     const hasUnsaved = projectSyncStatus === "dirty" || saveAttempt !== null || saveStatus === "saving" || (projectSyncStatus === "unverified" && Boolean(project.enterpriseId));
     if (!hasUnsaved) {
-      if (target.kind === "create") createProject(target.enterprise);
+      if (target.kind === "create") void createProject(target.enterprise);
       else if (target.kind === "open") void finishOpenProject(target.projectId);
       else finishEnterpriseSwitch(target.enterpriseId);
       return;
@@ -192,7 +233,7 @@ export function ProjectWorkspacePage() {
         return;
       }
       setPendingTransition(null);
-      if (target.kind === "create") createProject(target.enterprise);
+      if (target.kind === "create") await createProject(target.enterprise);
       else if (target.kind === "open") await finishOpenProject(target.projectId);
       else finishEnterpriseSwitch(target.enterpriseId);
     } finally {
@@ -256,6 +297,7 @@ export function ProjectWorkspacePage() {
           </div>
           <button
             type="button"
+            disabled={saveStatus === "saving" || recoveryBusy}
             onClick={() => {
               setRefreshVersion((version) => version + 1);
             }}
@@ -280,6 +322,7 @@ export function ProjectWorkspacePage() {
               {enterpriseStatus === "error" ? (
                 <p role="alert" className="text-sm text-amber-700">Не удалось загрузить предприятия. Нажмите «Обновить», чтобы повторить попытку.</p>
               ) : null}
+              {enterpriseStatus === "forbidden" ? <p role="alert" className="text-sm text-amber-700">Доступ к предприятиям запрещён. После восстановления доступа нажмите «Обновить».</p> : null}
               {enterpriseStatus === "idle" && enterprises.length === 0 ? (
                 <div role="status" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                   <p className="font-semibold">Нет доступных предприятий.</p>
@@ -291,7 +334,7 @@ export function ProjectWorkspacePage() {
                   key={enterprise.enterpriseId}
                   type="button"
                   onClick={() => requestTransition({ kind: "enterprise", enterpriseId: enterprise.enterpriseId })}
-                  disabled={recoveryBusy}
+                  disabled={recoveryBusy || saveStatus === "saving" || loadStatus === "loading"}
                   className={`rounded-md border px-3 py-2 text-left transition ${
                     selectedEnterprise?.enterpriseId === enterprise.enterpriseId
                       ? "border-blue-500 bg-blue-50 text-blue-950"
@@ -313,30 +356,34 @@ export function ProjectWorkspacePage() {
                   aria-label="Название конфигурации"
                   value={newProjectName}
                   onChange={(event) => setNewProjectName(event.target.value)}
-                  className="h-10 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-blue-500"
-                  maxLength={120}
+                  disabled={saveStatus === "saving"}
+                  aria-invalid={!validName}
+                  aria-describedby={!validName ? "workspace-name-error" : undefined}
+                  className="h-10 min-w-0 flex-1 rounded-md border border-slate-300 px-3 text-sm outline-none focus:border-blue-500"
                 />
                 <button
                   type="button"
                   onClick={() => selectedEnterprise && requestTransition({ kind: "create", enterprise: selectedEnterprise })}
-                  disabled={!selectedEnterprise || saveStatus === "saving"}
+                  disabled={!selectedEnterprise || !validName || saveStatus === "saving" || loadStatus === "loading" || recoveryBusy}
                   className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <Plus className="h-4 w-4" />
                   Создать
                 </button>
               </div>
+              {!validName ? <p id="workspace-name-error" role="alert" className="mt-2 text-sm text-amber-700">Название должно содержать от 1 до 120 символов после удаления пробелов по краям.</p> : null}
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white">
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Конфигурации</h2>
-                <span className="text-xs text-slate-400">{filteredVariants.length} шт.</span>
+                <span className="text-xs text-slate-400">Всего: {currentList && listStatus === "idle" ? totalItems : "—"}</span>
               </div>
-              {listStatus === "loading" ? (
+              {selectedEnterprise && (!currentList || listStatus === "loading") ? (
                 <p className="p-4 text-sm text-slate-500">Загрузка конфигураций...</p>
               ) : null}
-              {filteredVariants.length === 0 && listStatus !== "loading" ? (
+              {currentList && listStatus === "error" ? <p role="alert" className="p-4 text-sm text-amber-700">{listForbidden ? "Доступ к конфигурациям запрещён." : "Не удалось загрузить конфигурации."} {listError} Нажмите «Обновить», чтобы повторить попытку.</p> : null}
+              {((currentList && listStatus === "idle" && filteredVariants.length === 0) || enterpriseStatus === "idle" && !selectedEnterprise) ? (
                 <p className="p-4 text-sm text-slate-500">{selectedEnterprise
                   ? "Для выбранного предприятия пока нет конфигураций. Введите название выше и нажмите «Создать», чтобы перейти к карте."
                   : "Конфигурации появятся после выбора доступного предприятия."}</p>
@@ -346,6 +393,7 @@ export function ProjectWorkspacePage() {
                   <button
                     key={project.projectId}
                     type="button"
+                    disabled={saveStatus === "saving" || loadStatus === "loading" || recoveryBusy}
                     onClick={() => requestTransition({ kind: "open", projectId: project.projectId })}
                     className="flex w-full items-center justify-between gap-4 px-4 py-3 text-left transition hover:bg-slate-50"
                   >
@@ -362,30 +410,41 @@ export function ProjectWorkspacePage() {
                   </button>
                 ))}
               </div>
+              {currentList && totalItems > pageSize ? (
+                <nav aria-label="Страницы конфигураций" className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 text-sm">
+                  <span>{pageOffset + 1}–{Math.min(pageOffset + pageSize, totalItems)} из {totalItems}</span>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => changePage(Math.max(0, pageOffset - pageSize))} disabled={pageOffset === 0 || listStatus === "loading"} className="min-h-11 rounded-md border border-slate-300 px-3 disabled:opacity-50">Предыдущая страница</button>
+                    <button type="button" onClick={() => changePage(pageOffset + pageSize)} disabled={pageOffset + pageSize >= totalItems || listStatus === "loading"} className="min-h-11 rounded-md border border-slate-300 px-3 disabled:opacity-50">Следующая страница</button>
+                  </div>
+                </nav>
+              ) : null}
             </div>
 
             <div className="rounded-lg border border-slate-200 bg-white p-4">
               <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Сравнение конфигураций</h2>
               <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
                 <select
+                  aria-label="Первая конфигурация"
                   value={compareA}
                   onChange={(event) => setCompareA(event.target.value)}
                   className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-blue-500"
                 >
                   <option value="">Первая конфигурация</option>
-                  {variants.map((project) => (
+                  {filteredVariants.map((project) => (
                     <option key={project.projectId} value={project.projectId}>
                       {project.name}
                     </option>
                   ))}
                 </select>
                 <select
+                  aria-label="Вторая конфигурация"
                   value={compareB}
                   onChange={(event) => setCompareB(event.target.value)}
                   className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-blue-500"
                 >
                   <option value="">Вторая конфигурация</option>
-                  {variants.map((project) => (
+                  {filteredVariants.map((project) => (
                     <option key={project.projectId} value={project.projectId}>
                       {project.name}
                     </option>
@@ -434,7 +493,7 @@ export function ProjectWorkspacePage() {
               <h2 id="project-transition-title" className="text-lg font-bold">Есть несохранённые изменения</h2>
               <p className="mt-2 text-sm text-slate-600">Сохраните текущий проект, останьтесь здесь или явно откажитесь от локальных изменений перед продолжением.</p>
               {!useDefenseVariantsStore.getState().activeVariantId ? (
-                <label className="mt-4 block text-sm font-medium">Имя нового варианта перед переходом<input aria-label="Имя нового варианта перед переходом" value={transitionSaveName} onChange={(event) => setTransitionSaveName(event.target.value)} maxLength={120} className="mt-1 h-10 w-full rounded-md border border-slate-300 px-3" /></label>
+                <label className="mt-4 block text-sm font-medium">Имя нового варианта перед переходом<input aria-label="Имя нового варианта перед переходом" value={transitionSaveName} onChange={(event) => setTransitionSaveName(event.target.value)} className="mt-1 h-10 w-full rounded-md border border-slate-300 px-3" /></label>
               ) : null}
               <div className="mt-5 flex flex-wrap justify-end gap-2">
                 <button type="button" onClick={() => void resolveTransition("stay")} disabled={transitionBusy} className="min-h-11 rounded-md border border-slate-300 px-4 font-semibold">Остаться</button>

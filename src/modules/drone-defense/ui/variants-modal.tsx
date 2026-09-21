@@ -19,6 +19,7 @@ export function VariantsModal({ open, onClose }: Props) {
     variants,
     activeVariantId,
     listStatus,
+    listError,
     saveStatus,
     conflictState,
     error,
@@ -141,11 +142,11 @@ export function VariantsModal({ open, onClose }: Props) {
       destroyOnHidden
     >
       {contextHolder}
-      {draftStorageError ? <Alert type="warning" showIcon message={draftStorageError} style={{ marginBottom: token.marginMD }} /> : null}
+      {draftStorageError ? <Alert type="warning" showIcon title={draftStorageError} style={{ marginBottom: token.marginMD }} /> : null}
       {error ? (
         <Alert
           type="error"
-          message={error}
+          title={error}
           action={
             conflictState ? (
               <Button size="small" danger onClick={() => requestLoad(conflictState.projectId)}>
@@ -163,13 +164,15 @@ export function VariantsModal({ open, onClose }: Props) {
         />
       ) : null}
 
+      {listStatus === "error" ? <Alert type="warning" showIcon title="Не удалось загрузить варианты" description={listError} action={<Button size="small" onClick={() => void fetchVariants()}>Повторить загрузку</Button>} style={{ marginBottom: token.marginMD }} /> : null}
+
       {recoveryStatus === "loading" ? <div role="status" style={{ marginBottom: token.marginMD }}><Spin size="small" /> <Typography.Text type="secondary">Проверяем локальный черновик…</Typography.Text></div> : null}
-      {recoveryError ? <Alert type="warning" showIcon message="Локальное восстановление недоступно" description={recoveryError} style={{ marginBottom: token.marginMD }} /> : null}
+      {recoveryError ? <Alert type="warning" showIcon title="Локальное восстановление недоступно" description={recoveryError} style={{ marginBottom: token.marginMD }} /> : null}
       {recoveryDraft ? (
         <Alert
           type="warning"
           showIcon
-          message="Найден локальный несохранённый черновик"
+          title="Найден локальный несохранённый черновик"
           description="Доступ к серверному проекту подтверждён. Можно явно восстановить локальные изменения; они не отправятся на сервер автоматически."
           action={<Button size="small" onClick={restoreDraft}>Восстановить</Button>}
           style={{ marginBottom: token.marginMD }}
@@ -267,6 +270,7 @@ function VariantsBody({
       </div>
     );
   }
+  if (listStatus === "error") return null;
 
   if (variants.length === 0) {
     return (

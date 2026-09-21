@@ -51,16 +51,19 @@ export function buildEnterpriseGetUrl(id: string) {
 
 export function normalizeEnterprisePayload(payload: BackendEnterprisePayload): ProtectedObjectOption {
   if (!isRecord(payload) || typeof payload.id !== "string" || !payload.id.trim() || typeof payload.name !== "string" || !payload.name.trim()) throw new FortisProtocolError();
-  const id = cleanString(stringValue(payload, "id")) ?? crypto.randomUUID();
-  const name = cleanString(stringValue(payload, "name")) ?? "Объект защиты";
+  const id = payload.id.trim();
+  const name = payload.name.trim();
+  const lat = numberValue(payload, "latitude");
+  const lng = numberValue(payload, "longitude");
+  if (lat === undefined || lng === undefined || Math.abs(lat) > 90 || Math.abs(lng) > 180) throw new FortisProtocolError();
 
   return {
     id,
     enterpriseId: id,
     name,
     center: {
-      lat: numberValue(payload, "latitude") ?? 0,
-      lng: numberValue(payload, "longitude") ?? 0,
+      lat,
+      lng,
     },
     address: cleanString(stringValue(payload, "address")),
     status: normalizeEnterpriseStatus(stringValue(payload, "status")),
@@ -68,7 +71,7 @@ export function normalizeEnterprisePayload(payload: BackendEnterprisePayload): P
   };
 }
 
-export async function fetchEnterprises(options: FetchEnterprisesOptions = {}) {
+export async function fetchEnterprisePage(options: FetchEnterprisesOptions = {}) {
   const response = await getApiJson<BackendEnterpriseListResponse | BackendEnterprisePayload[]>(enterprisesPath, {
     query: {
       limit: options.limit,
@@ -76,7 +79,13 @@ export async function fetchEnterprises(options: FetchEnterprisesOptions = {}) {
     },
   });
   const items = requireListItems<Record<string, unknown>>(response);
-  return items.map(normalizeEnterprisePayload);
+  const totalItems = Array.isArray(response) ? response.length : response.totalItems;
+  if (!Number.isSafeInteger(totalItems) || totalItems! < items.length) throw new FortisProtocolError();
+  return { items: items.map(normalizeEnterprisePayload), totalItems: totalItems! };
+}
+
+export async function fetchEnterprises(options: FetchEnterprisesOptions = {}) {
+  return (await fetchEnterprisePage(options)).items;
 }
 
 export async function getEnterprise(id: string) {

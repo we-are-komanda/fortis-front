@@ -25,10 +25,12 @@ before(async () => {
       import {setAuthenticatedIdentity} from './src/shared/lib/session-state';
       import './src/shared/lib/identity';
       const initial = window.fixture;
-      setAuthenticatedIdentity('user-A');
-      projects.getState().acceptServerProject(initial.project);
-      projects.getState().setLocalDraftsEnabled(true);
-      variants.setState({activeVariantId: initial.project.projectId, activeVariantName: initial.project.projectName});
+      if(!initial.unauthenticated){
+        setAuthenticatedIdentity('user-A');
+        projects.getState().acceptServerProject(initial.project);
+        projects.getState().setLocalDraftsEnabled(true);
+        variants.setState({activeVariantId: initial.project.projectId, activeVariantName: initial.project.projectName});
+      }
       window.frc06 = {state: () => ({project: projects.getState().project, status: projects.getState().syncStatus,
         error: variants.getState().error, active: variants.getState().activeVariantId}),
         edit: name => projects.getState().replaceProject({...projects.getState().project,projectName:name})};
@@ -52,7 +54,7 @@ after(async () => { await browser?.close(); });
 function project(id = "P"): DefenseProject {
   return {...createWorkspaceDefenseProject(), projectId:id, enterpriseId:"E", projectName:`Project ${id}`, version:7, source:"backend"};
 }
-async function fixture(workspace = false) {
+async function fixture(workspace = false, options: { unauthenticated?: boolean; rejectAfterLogout?: boolean } = {}) {
   const page = await browser.newPage({viewport:{width:1280,height:900}});
   page.setDefaultTimeout(3000);
   const server = new Map([['P',project()],['Q',project('Q')]]);
@@ -63,6 +65,7 @@ async function fixture(workspace = false) {
   let getStatus = 200;
   let authHold: Promise<void> | null = null;
   let userId = 'user-A';
+  let loggedOut = false;
   let hold: Promise<void> | null = null;
   page.on('pageerror',e=>errors.push(e.message));
   page.on('dialog', dialog=>{ void dialog.accept(); });
@@ -70,10 +73,15 @@ async function fixture(workspace = false) {
     const req=route.request(); const url=new URL(req.url()); const path=url.pathname;
     if(path.startsWith('/api/')) requests.push(`${req.method()} ${path}`);
     if(path==='/api/runtime') return route.fulfill({json:{mode:'workspace',localDraftsEnabled:true}});
-    if(path==='/api/auth/me') { if(authHold) await authHold; return route.fulfill({json:{id:userId}}); }
-    if(path==='/api/auth/logout') return route.fulfill({json:{status:'ok'}});
+    if(path==='/api/auth/me') { if(authHold) await authHold; return options.unauthenticated || (loggedOut && options.rejectAfterLogout) ? route.fulfill({status:401,json:{message:'Unauthenticated'}}) : route.fulfill({json:{id:userId}}); }
+    if(path==='/api/auth/logout') { loggedOut=true; return route.fulfill({json:{status:'ok'}}); }
     if(path==='/api/v1/enterprises') return route.fulfill({json:{items:[{id:'E',name:'Enterprise E',latitude:55,longitude:37},{id:'F',name:'Enterprise F',latitude:56,longitude:38}],totalItems:2}});
-    if(path==='/api/defense/projects' && req.method()==='GET') return route.fulfill({json:{items:[...server.values()].map(p=>({...p,name:p.projectName})),totalItems:server.size}});
+    if(path==='/api/defense/projects' && req.method()==='GET') {
+      const enterpriseId=url.searchParams.get('enterpriseId');
+      const items=[...server.values()].filter(p=>!enterpriseId || p.enterpriseId===enterpriseId).map(p=>({...p,name:p.projectName}));
+      const offset=Number(url.searchParams.get('offset')??0), limit=Number(url.searchParams.get('limit')??50);
+      return route.fulfill({json:{items:items.slice(offset,offset+limit),totalItems:items.length}});
+    }
     if(path==='/api/defense/projects' && req.method()==='POST') {
       creates.push({body:req.postData()!,key:req.headers()['idempotency-key']??null});
       if(putStatus!==200) return route.fulfill({status:putStatus,json:{message:'Fixture create failed'},headers:{'x-request-id':'fixture-create'}});
@@ -94,9 +102,9 @@ async function fixture(workspace = false) {
     return route.fulfill({contentType:'text/html',body:'<html lang="ru"><body><div id="root"></div></body></html>'});
   });
   const boot=async()=>{
-    await page.evaluate(data=>Object.assign(window,{fixture:data}),{project:server.get('P'),workspace});
+    await page.evaluate(data=>Object.assign(window,{fixture:data}),{project:server.get('P'),workspace,unauthenticated:options.unauthenticated});
     await page.addScriptTag({content:bundle});
-    await expect(page.getByRole('button',{name:'Выйти',exact:true})).toBeVisible();
+    if(!options.unauthenticated)await expect(page.getByRole('button',{name:'Выйти',exact:true})).toBeVisible();
   };
   await page.goto('https://fortis.test/workspace');await boot();
   return {page,server,requests,creates,errors,boot,fail:(status:number)=>{putStatus=status;},denyRead:(status:number)=>{getStatus=status;},hold:(pending:Promise<void>|null)=>{hold=pending;},auth:(pending:Promise<void>|null,id='user-A')=>{authHold=pending;userId=id;}};
@@ -266,5 +274,28 @@ test('enterprise Save keeps selection after failure and switches after confirmed
     await expect(f.page.getByRole('dialog',{name:'Есть несохранённые изменения',exact:true})).toBeHidden();
     assert.equal(f.server.get('P')?.version,8);
     await expect(f.page.getByText('Для выбранного предприятия пока нет конфигураций. Введите название выше и нажмите «Создать», чтобы перейти к карте.',{exact:true})).toBeVisible();
+  }finally{await f.page.close();}
+});
+
+
+test('successful logout never rechecks a known invalid session', {skip:!enabled,timeout:15000}, async()=>{
+  const f=await fixture(false,{rejectAfterLogout:true});try{
+    await f.page.getByRole('button',{name:'Выйти',exact:true}).click();
+    await f.page.waitForURL('https://fortis.test/login');
+    assert.equal(f.requests.filter(r=>r==='POST /api/auth/logout').length,1);
+    const afterLogout=f.requests.slice(f.requests.indexOf('POST /api/auth/logout')+1);
+    assert.equal(afterLogout.includes('GET /api/auth/me'),false);
+    await expect(f.page.getByRole('textbox',{name:'Название проекта',exact:true})).toHaveCount(0);
+    await expect(f.page.getByRole('button',{name:'Выйти',exact:true})).toHaveCount(0);
+    assert.deepEqual(f.errors,[]);
+  }finally{await f.page.close();}
+});
+
+test('an initially unknown session still checks auth and redirects on its first 401', {skip:!enabled,timeout:15000}, async()=>{
+  const f=await fixture(false,{unauthenticated:true});try{
+    await f.page.waitForURL('https://fortis.test/login?next=%2Fworkspace');
+    assert.equal(f.requests.filter(r=>r==='GET /api/auth/me').length,1);
+    assert.equal(f.requests.includes('POST /api/auth/logout'),false);
+    await expect(f.page.getByRole('textbox',{name:'Название проекта',exact:true})).toHaveCount(0);
   }finally{await f.page.close();}
 });

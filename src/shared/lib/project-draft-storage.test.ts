@@ -83,3 +83,16 @@ test("reload preserves the exact frozen create body and key alongside a newer dr
   assert.equal(loaded.value.attempt?.idempotencyKey, attempt.idempotencyKey);
   assert.ok(loaded.value.attempt?.idempotencyKey);
 });
+
+test("recovery names count Unicode code points at the 120 character boundary", () => {
+  for (const length of [120, 121]) {
+    const name = "😀".repeat(length);
+    const attempt = {
+      kind: "create" as const, name, project: record.draft, businessRevision: 2,
+      body: JSON.stringify({ name, enterpriseId: "E", projectJson: JSON.stringify(record.draft) }),
+      idempotencyKey: "unicode-create-key", startedAt: "2026-09-20T00:00:00Z",
+    };
+    Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: () => JSON.stringify({ ...record, attempt }) } });
+    assert.equal(readProjectDraft(scope, true).ok, length === 120);
+  }
+});

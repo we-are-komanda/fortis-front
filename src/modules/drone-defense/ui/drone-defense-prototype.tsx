@@ -1351,6 +1351,22 @@ export function DroneDefensePrototype() {
               </div>
             ) : null}
 
+            {project.layers.length === 0 && !layerWizardState ? (
+              <div className={styles.prototypeLayerPanelWrap}>
+                <div className={`${styles.prototypeLayerPanel} ${styles.prototypeCard} flex flex-wrap items-center justify-between gap-3`}>
+                  <p className={styles.prototypeMeta}>В конфигурации пока нет эшелонов.</p>
+                  <button
+                    type="button"
+                    className={`${styles.prototypeButtonPrimary} min-h-11 cursor-pointer px-4`}
+                    onClick={createProjectLayer}
+                  >
+                    <PlusOutlined />
+                    Добавить эшелон
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <button
               type="button"
               data-sidebar-toggle-state={isCatalogTrayOpen ? "hidden" : "visible"}

@@ -18,9 +18,25 @@ test("workspace recovery cannot cross authenticated identities", () => {
   } finally { Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage }); }
 });
 
-import { setAuthenticatedIdentity, useSessionStore } from "./session-state";
+import { beginSessionVerification, setAuthenticatedIdentity, useSessionStore } from "./session-state";
 import { useDefenseVariantsStore as variants } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { useDefenseStudioStore as studio } from "@/modules/drone-defense/domain/use-defense-studio-store";
+
+test("successful authentication clears the previous identity and permits a fresh verification", () => {
+ setAuthenticatedIdentity("previous-user");
+ projects.getState().replaceProject({ ...createWorkspaceDefenseProject(), projectId: "private-previous", projectName: "Private previous project" });
+ variants.setState({ activeVariantId: "private-previous", activeVariantName: "Private previous project" });
+ const generation = useSessionStore.getState().generation;
+ beginSessionVerification();
+ assert.equal(useSessionStore.getState().userId, null);
+ assert.equal(useSessionStore.getState().invalid, false);
+ assert.equal(useSessionStore.getState().generation, generation + 1);
+ assert.notEqual(projects.getState().project.projectId, "private-previous");
+ assert.equal(variants.getState().activeVariantId, null);
+ setAuthenticatedIdentity(null);
+ beginSessionVerification();
+ assert.equal(useSessionStore.getState().invalid, false);
+});
 
 test("account switch resets all stores and drops an in-flight A list", async () => {
  const original = globalThis.fetch;

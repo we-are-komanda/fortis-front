@@ -73,9 +73,15 @@ export function recommendConfigurationRequest(configuration: Configuration, budg
   });
 }
 
-export async function listVariants(): Promise<VariantListResponse> {
-  const data = await readVariantJson<VariantListResponse>("/api/defense/projects");
+export type VariantListQuery = { enterpriseId?: string; limit?: number; offset?: number };
+
+export async function listVariants(query: VariantListQuery = {}): Promise<VariantListResponse> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value !== undefined) params.set(key, String(value));
+  const data = await readVariantJson<VariantListResponse>(`/api/defense/projects${params.size ? `?${params}` : ""}`);
   validateProjectList(data);
+  if (!Number.isSafeInteger(data.totalItems) || data.totalItems < data.items.length ||
+      (query.enterpriseId && data.items.some(item => item.enterpriseId !== query.enterpriseId))) throw new FortisProtocolError();
   return data;
 }
 
@@ -83,13 +89,15 @@ export async function loadVariant(id: string, signal?: AbortSignal, projectVersi
   const query = projectVersion === undefined ? "" : `?projectVersion=${encodeURIComponent(projectVersion)}`;
   const data = await readVariantJson<DefenseProject>(`/api/defense/projects/${encodeURIComponent(id)}${query}`, { signal });
   validateProjectPayload(data);
+  if (typeof data.enterpriseId !== "string" || !data.enterpriseId.trim() || !Number.isSafeInteger(data.version) || data.version! < 1) throw new FortisProtocolError();
   return data;
 }
 
 function projectUpdatePayload(args: { name: string; project: DefenseProject }) {
+  if (!args.project.enterpriseId?.trim()) throw new FortisProtocolError();
   return {
     name: args.name,
-    enterpriseId: args.project.enterpriseId ?? args.project.baseObject.id,
+    enterpriseId: args.project.enterpriseId,
     projectJson: exportDefenseProjectJson(args.project),
     ...(typeof args.project.version === "number" ? { version: args.project.version } : {}),
   };

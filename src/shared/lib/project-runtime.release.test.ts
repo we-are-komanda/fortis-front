@@ -30,7 +30,7 @@ test("failed load and save preserve current project; no automatic retry after an
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (input, init) => originalFetch(typeof input === "string" && input.startsWith("/") ? base + input : input, init);
-  const project = { ...createDefaultDefenseProject(), source: "backend" as const, projectId: "synthetic", version: 3 };
+  const project = { ...createDefaultDefenseProject(), source: "backend" as const, projectId: "synthetic", enterpriseId: "synthetic-enterprise", version: 3 };
   projects.setState({ project }); variants.setState({ activeVariantId: project.projectId });
   try {
     await variants.getState().loadVariant("another-project");

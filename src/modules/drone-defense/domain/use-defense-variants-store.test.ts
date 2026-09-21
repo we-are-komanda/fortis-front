@@ -51,11 +51,13 @@ function resetStore(): void {
   fetchCalls.length = 0;
   useDefenseVariantsStore.setState(useDefenseVariantsStore.getInitialState(), true);
   useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
+  useDefenseProjectStore.setState({ project: { ...useDefenseProjectStore.getState().project, enterpriseId: "enterprise-1" } });
 }
 
 function summary(overrides: Partial<VariantSummary> = {}): VariantSummary {
   return {
     projectId: "A",
+    enterpriseId: "enterprise-1",
     name: "name-A",
     projectName: "proj-A",
     version: 1,
@@ -68,6 +70,7 @@ function minimalProject(id: string): DefenseProject {
   return {
     schemaVersion: 1,
     projectId: id,
+    enterpriseId: "enterprise-1",
     projectName: `proj-${id}`,
     version: 7,
     baseObject: { id: "o1", name: "Obj", center: { lat: 55.75, lng: 37.61 } },

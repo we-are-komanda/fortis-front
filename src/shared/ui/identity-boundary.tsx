@@ -36,6 +36,7 @@ function SessionIdentityBoundary({ children }: { children: React.ReactNode }) {
   let cancelled = false;
   let check = 0;
   async function validate() {
+   if (useSessionStore.getState().invalid) return;
    const currentCheck = ++check;
    const generation = sessionGeneration();
    setChecking(true);
