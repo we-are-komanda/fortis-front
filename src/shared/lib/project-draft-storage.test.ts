@@ -30,3 +30,11 @@ test("corrupt JSON and cross-scope envelopes are rejected without deleting store
     assert.equal(readProjectDraft(scope, true).ok, false);
   }
 });
+test("attempt replay metadata must match its scoped project and exact request body", () => {
+  const withAttempt = { ...record, attempt: { kind: "create" as const, project: record.draft, name: "copy", body: "{}", idempotencyKey: "same-key", businessRevision: 3, startedAt: "2026-09-20T00:00:00Z" } };
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: () => JSON.stringify(withAttempt) } });
+  assert.equal(readProjectDraft(scope, true).ok, false);
+  const forgedScope = { ...withAttempt, attempt: { ...withAttempt.attempt, body: JSON.stringify({ name: "copy", enterpriseId: "other", projectJson: JSON.stringify(withAttempt.draft) }) } };
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: () => JSON.stringify(forgedScope) } });
+  assert.equal(readProjectDraft(scope, true).ok, false);
+});

@@ -8,6 +8,7 @@ export type SaveAttempt = {
   name: string;
   body: string;
   idempotencyKey?: string;
+  verificationRequired?: boolean;
   businessRevision: number;
   startedAt: string;
 };
@@ -21,8 +22,8 @@ export function businessContent(project: DefenseProject): string {
   const { projectId, version, source, updatedAt, activeLayerId, selectedAssetId, selectedObjectId, mode, ...business } = project;
   void projectId; void version; void source; void updatedAt; void activeLayerId; void selectedAssetId; void selectedObjectId; void mode;
   return JSON.stringify(sorted({ ...business,
-    layers: project.layers.map(({ isActive, isVisible, isLocked, ...layer }) => { void isActive; void isVisible; void isLocked; return layer; }),
-    placedObjects: project.placedObjects.map(({ isVisibleOnMap, updatedAt, ...object }) => { void isVisibleOnMap; void updatedAt; return object; }),
+    layers: project.layers.map(({ isActive, ...layer }) => { void isActive; return layer; }),
+    placedObjects: project.placedObjects.map(({ updatedAt, ...object }) => { void updatedAt; return object; }),
   }));
 }
 export function savedProjectRef(project: DefenseProject | null): ProjectRef | null {

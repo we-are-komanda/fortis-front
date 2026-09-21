@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createWorkspaceDefenseProject } from "./defense-project";
+import { createRingLayer, createWorkspaceDefenseProject } from "./defense-project";
 import { businessContent, classifySaveVerification, savedProjectRef } from "./project-save-state";
+import type { PlacedDefenseObject } from "@/shared/types/defense-project";
 
 const project = () => ({ ...createWorkspaceDefenseProject(), projectId: "P", enterpriseId: "E", version: 7, source: "backend" as const });
 test("selection and transport changes are not business changes", () => {
@@ -9,6 +10,22 @@ test("selection and transport changes are not business changes", () => {
   const next = { ...value, selectedAssetId: "A", selectedObjectId: "O", activeLayerId: "L", mode: "measure" as const, version: 8, updatedAt: "later", layers: value.layers.map(layer => ({ ...layer, isActive: !layer.isActive })) };
   assert.equal(businessContent(next), businessContent(value));
   assert.notEqual(businessContent({ ...value, projectName: "edited" }), businessContent(value));
+});
+test("persisted layer visibility and lock state are business changes", () => {
+  const value = project();
+  const layer = createRingLayer(value, { id: "L1", isActive: false });
+  const withLayer = { ...value, layers: [layer] };
+  assert.notEqual(businessContent({ ...withLayer, layers: [{ ...layer, isVisible: false }] }), businessContent(withLayer));
+  assert.notEqual(businessContent({ ...withLayer, layers: [{ ...layer, isLocked: true }] }), businessContent(withLayer));
+});
+test("placed-object map visibility is a persisted business change", () => {
+  const value = project();
+  const object: PlacedDefenseObject = {
+    id: "O1", assetId: "A1", layerId: "L1", coordinates: { lat: 0, lng: 0 }, quantity: 1,
+    status: "planned", isVisibleOnMap: true, createdAt: "2026-09-20T00:00:00Z", updatedAt: "2026-09-20T00:00:00Z",
+  };
+  const withObject = { ...value, placedObjects: [object] };
+  assert.notEqual(businessContent(withObject), businessContent({ ...withObject, placedObjects: [{ ...object, isVisibleOnMap: false }] }));
 });
 test("business comparison preserves unknown fields and array ordering", () => {
   const value = project();

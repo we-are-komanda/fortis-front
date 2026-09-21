@@ -60,6 +60,7 @@ type DefenseProjectState = {
   businessRevision: number;
   savedProject: DefenseProject | null;
   saveAttempt: SaveAttempt | null;
+  setSaveAttempt: (attempt: SaveAttempt | null) => void;
   draftStorageError: string | null;
   localDraftSaved: boolean;
   acceptServerProject: (project: DefenseProject) => void;
@@ -141,8 +142,9 @@ export function projectStorageKey(userId: string) { return `${FORTIS_DEFENSE_PRO
 function persist(project: DefenseProject) {
   const state = useDefenseProjectStore.getState();
   const userId = state.runtimeMode === "demo" ? "demo" : state.identityId;
-  if (!userId) return;
-  const result = writeProjectDraft({ schemaVersion: 1, userId, enterpriseId: project.enterpriseId ?? project.baseObject.id,
+  const enterpriseId = project.enterpriseId;
+  if (!userId || !enterpriseId) return;
+  const result = writeProjectDraft({ schemaVersion: 1, userId, enterpriseId,
     projectId: project.projectId, draft: project, savedProject: state.savedProject, businessRevision: state.businessRevision,
     savedAt: new Date().toISOString(), ...(state.saveAttempt ? { attempt: state.saveAttempt } : {}),
   }, state.localDraftsEnabled);
@@ -190,7 +192,7 @@ function mergeProtectedObjectOptions(
 
 function applyProject(project: DefenseProject, set: (state: Partial<DefenseProjectState>) => void) {
   const state = useDefenseProjectStore.getState();
-  const savedProject = state.savedProject?.projectId === project.projectId ? state.savedProject : null;
+  const savedProject = state.savedProject?.projectId === project.projectId && state.savedProject.enterpriseId === project.enterpriseId ? state.savedProject : null;
   const changed = businessContent(project) !== businessContent(state.project);
   set({ project, savedProject, businessRevision: state.businessRevision + (changed ? 1 : 0), hydrated: true,
     syncStatus: state.accessError ? "unverified" : savedProject && businessContent(project) === businessContent(savedProject) ? "saved" : "dirty",
@@ -210,6 +212,10 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     businessRevision: 0,
     savedProject: null,
     saveAttempt: null,
+    setSaveAttempt: (attempt) => {
+      set({ saveAttempt: attempt });
+      persist(get().project);
+    },
     draftStorageError: null,
     localDraftSaved: false,
     acceptServerProject: (project) => set({ project, savedProject: project, saveAttempt: null, businessRevision: 0,
@@ -219,11 +225,11 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       const project = { ...latest, projectId: server.projectId, enterpriseId: server.enterpriseId, version: server.version, updatedAt: server.updatedAt, source: "backend" as const };
       const baseline = { ...sent, projectId: server.projectId, enterpriseId: server.enterpriseId, version: server.version, updatedAt: server.updatedAt, source: "backend" as const };
       set({ project, savedProject: baseline, saveAttempt: null, syncStatus: businessContent(project) === businessContent(baseline) ? "saved" : "dirty", hydrated: true, ...syncSelection(project) });
-      if (sent.projectId !== project.projectId && get().identityId) removeProjectDraft({ userId: get().identityId!, enterpriseId: sent.enterpriseId ?? sent.baseObject.id, projectId: sent.projectId }, get().localDraftsEnabled);
+      if (sent.projectId !== project.projectId && sent.enterpriseId && get().identityId) removeProjectDraft({ userId: get().identityId!, enterpriseId: sent.enterpriseId, projectId: sent.projectId }, get().localDraftsEnabled);
       persist(project);
     },
     restoreVerifiedDraft: (record) => {
-      set({ project: record.draft, savedProject: record.savedProject, saveAttempt: record.attempt ?? null,
+      set({ project: record.draft, savedProject: record.savedProject, saveAttempt: record.attempt?.kind === "update" ? { ...record.attempt, verificationRequired: true } : record.attempt ?? null,
         businessRevision: record.businessRevision, hydrated: true, syncStatus: "dirty", localDraftSaved: true, draftStorageError: null, accessError: null, ...syncSelection(record.draft) });
     },
     localDraftsEnabled: false,

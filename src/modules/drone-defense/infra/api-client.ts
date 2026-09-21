@@ -96,7 +96,8 @@ function projectUpdatePayload(args: { name: string; project: DefenseProject }) {
 }
 
 export function prepareProjectSave(kind: SaveAttempt["kind"], name: string, project: DefenseProject, businessRevision: number): SaveAttempt {
-  return { kind, name, project, businessRevision, body: JSON.stringify(projectUpdatePayload({ name, project })),
+  const snapshot = JSON.parse(JSON.stringify(project)) as DefenseProject;
+  return { kind, name, project: snapshot, businessRevision, body: JSON.stringify(projectUpdatePayload({ name, project: snapshot })),
     startedAt: new Date().toISOString(), ...(kind === "create" ? { idempotencyKey: crypto.randomUUID() } : {}) };
 }
 

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
+import { useEffect } from "react";
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
@@ -14,6 +15,8 @@ import { useDefenseStudioStore } from "@/modules/drone-defense/domain/use-defens
 import { canOpenCapability } from "@/shared/config/product-capabilities";
 import { useRuntimeMode } from "@/shared/ui/runtime-provider";
 import { VariantSaveButton, VariantStatusButton } from "@/modules/drone-defense/ui/variant-selector";
+import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
+import { useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
 
 type DefenseStudioShellProps = {
   children: React.ReactNode;
@@ -30,6 +33,20 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
   const searchParams = useSearchParams();
   const view = useDefenseStudioStore((state) => state.view);
   const setView = useDefenseStudioStore((state) => state.setView);
+  const syncStatus = useDefenseProjectStore((state) => state.syncStatus);
+  const saveAttempt = useDefenseProjectStore((state) => state.saveAttempt);
+  const saveStatus = useDefenseVariantsStore((state) => state.saveStatus);
+  const hasPendingSave = syncStatus === "dirty" || saveAttempt !== null || saveStatus === "saving";
+
+  useEffect(() => {
+    if (!hasPendingSave) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [hasPendingSave]);
 
   const normalizedPathname = pathname.replace(/\/$/, "");
   const isPrototype = normalizedPathname === "/prototype";

@@ -1,5 +1,7 @@
 import type { DefenseProject } from "@/shared/types/defense-project";
 import type { SaveAttempt } from "./project-save-state";
+import { businessContent } from "./project-save-state";
+import { isRecord } from "./api-client";
 import { importDefenseProjectJson } from "./defense-project";
 
 export type DraftScope = { userId: string; enterpriseId: string; projectId: string };
@@ -33,15 +35,19 @@ export function readProjectDraft(scope: DraftScope, enabled: boolean): StorageRe
     const value = JSON.parse(raw) as ProjectDraft;
     if (value.schemaVersion !== 1 || value.userId !== scope.userId || value.enterpriseId !== scope.enterpriseId || value.projectId !== scope.projectId || !Number.isSafeInteger(value.businessRevision) || value.businessRevision < 0 || typeof value.savedAt !== "string") return failure();
     const draft = importDefenseProjectJson(JSON.stringify(value.draft));
-    if (draft.projectId !== scope.projectId || (draft.enterpriseId ?? draft.baseObject.id) !== scope.enterpriseId) return failure();
+    if (draft.projectId !== scope.projectId || draft.enterpriseId !== scope.enterpriseId) return failure();
     const savedProject = value.savedProject === null ? null : importDefenseProjectJson(JSON.stringify(value.savedProject));
-    if (savedProject && (savedProject.projectId !== scope.projectId || savedProject.enterpriseId !== scope.enterpriseId)) return failure();
+    if (savedProject && (savedProject.projectId !== scope.projectId || savedProject.enterpriseId !== scope.enterpriseId || savedProject.source !== "backend" || !Number.isSafeInteger(savedProject.version) || savedProject.version! < 1)) return failure();
     if (value.attempt) {
       const attempt = value.attempt;
-      if (!["create", "update"].includes(attempt.kind) || typeof attempt.body !== "string" || typeof attempt.name !== "string" || typeof attempt.startedAt !== "string" || !Number.isSafeInteger(attempt.businessRevision) || (attempt.kind === "create" && typeof attempt.idempotencyKey !== "string")) return failure();
+      if (!isRecord(attempt) || !["create", "update"].includes(String(attempt.kind)) || typeof attempt.body !== "string" || typeof attempt.name !== "string" || !attempt.name.trim() || attempt.name.length > 120 || typeof attempt.startedAt !== "string" || !Number.isFinite(Date.parse(attempt.startedAt)) || !Number.isSafeInteger(attempt.businessRevision) || attempt.businessRevision < 0 || attempt.businessRevision > value.businessRevision || (attempt.verificationRequired !== undefined && typeof attempt.verificationRequired !== "boolean") || (attempt.kind === "create" && (typeof attempt.idempotencyKey !== "string" || !attempt.idempotencyKey.trim() || attempt.idempotencyKey.length > 200))) return failure();
       const sent = importDefenseProjectJson(JSON.stringify(attempt.project));
-      if (sent.projectId !== scope.projectId || (sent.enterpriseId ?? sent.baseObject.id) !== scope.enterpriseId) return failure();
-      JSON.parse(attempt.body);
+      if (sent.projectId !== scope.projectId || sent.enterpriseId !== scope.enterpriseId || (attempt.kind === "update" && (!Number.isSafeInteger(sent.version) || sent.version! < 1))) return failure();
+      const body = JSON.parse(attempt.body) as unknown;
+      if (!isRecord(body) || body.name !== attempt.name || body.enterpriseId !== scope.enterpriseId || typeof body.projectJson !== "string") return failure();
+      const bodyProject = importDefenseProjectJson(body.projectJson);
+      if (bodyProject.projectId !== scope.projectId || bodyProject.enterpriseId !== scope.enterpriseId || businessContent(bodyProject) !== businessContent(sent)) return failure();
+      if (attempt.kind === "update" && body.version !== sent.version) return failure();
     }
     return { ok: true, value: { ...value, draft, savedProject } };
   } catch { return failure(); }

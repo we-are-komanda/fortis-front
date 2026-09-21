@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { createWorkspaceDefenseProject } from "@/shared/lib/defense-project";
+import { draftStorageKey } from "@/shared/lib/project-draft-storage";
 import { useDefenseProjectStore as projects } from "@/shared/lib/use-defense-project-store";
 import { useDefenseVariantsStore as variants } from "./use-defense-variants-store";
 
@@ -58,6 +59,7 @@ for (const businessEdit of [true, false]) test(`pending save preserves ${busines
   assert.equal(projects.getState().project.projectName, businessEdit ? "edit2" : "edit1");
   assert.equal(projects.getState().syncStatus, businessEdit ? "dirty" : "saved");
   assert.equal(projects.getState().savedProject?.projectName, "edit1");
+  if (!businessEdit) assert.equal(projects.getState().project.selectedAssetId, "UI-only");
 });
 test("lost update response verifies current server identity before any second write", async () => {
   const project = savedFixture();
@@ -88,4 +90,43 @@ test("create manual retry preserves exact body and idempotency key", async () =>
   await variants.getState().saveAsNewVariant("copy");
   assert.deepEqual(requests[0], requests[1]);
   assert.equal(projects.getState().project.projectId, "copy");
+});
+test("create retry replays the frozen attempt even after a newer local edit", async () => {
+  const project = savedFixture();
+  const requests: { body: string; key: string | null }[] = [];
+  globalThis.fetch = async (_input, init) => {
+    if (init?.method === "POST") {
+      requests.push({ body: String(init.body), key: new Headers(init.headers).get("Idempotency-Key") });
+      return requests.length === 1 ? new Response(null, { status: 503 }) : Response.json({ projectId: "copy", enterpriseId: "E", version: 1, name: "copy" });
+    }
+    return Response.json({ items: [], totalItems: 0 });
+  };
+  await variants.getState().saveAsNewVariant("copy");
+  projects.getState().replaceProject({ ...projects.getState().project, projectName: "newer edit" });
+  await variants.getState().saveAsNewVariant("copy");
+  assert.deepEqual(requests[0], requests[1]);
+  assert.equal(projects.getState().project.projectName, "newer edit");
+  assert.equal(projects.getState().syncStatus, "dirty");
+  assert.equal(projects.getState().savedProject?.projectName, project.projectName);
+});
+test("recovery candidate is exposed only after a fresh authorized project read", async () => {
+  const server = savedFixture();
+  projects.setState({ ...projects.getState(), identityId: "A", localDraftsEnabled: true }, true);
+  const local = { ...server, projectName: "recovered work" };
+  const record = { schemaVersion: 1 as const, userId: "A", enterpriseId: "E", projectId: "P", draft: local, savedProject: server, businessRevision: 1, savedAt: "2026-09-20T00:00:00Z" };
+  const map = new Map<string, string>([[draftStorageKey({ userId: "A", enterpriseId: "E", projectId: "P" }), JSON.stringify(record)]]);
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => map.get(key) ?? null, setItem: (key: string, value: string) => map.set(key, value) } });
+  const calls: string[] = [];
+  globalThis.fetch = async (input) => { calls.push(String(input)); return Response.json({ ...server, version: 7 }); };
+  await variants.getState().checkRecoveryDraft();
+  assert.deepEqual(calls, ["/api/defense/projects/P"]);
+  assert.equal(variants.getState().recoveryDraft?.draft.projectName, "recovered work");
+});
+test("recovery is hidden when fresh project authorization fails", async () => {
+  savedFixture();
+  projects.setState({ ...projects.getState(), identityId: "A", localDraftsEnabled: true }, true);
+  globalThis.fetch = async () => Response.json({ error: { code: "forbidden", message: "denied" } }, { status: 403 });
+  await variants.getState().checkRecoveryDraft();
+  assert.equal(variants.getState().recoveryDraft, null);
+  assert.equal(projects.getState().syncStatus, "unverified");
 });
