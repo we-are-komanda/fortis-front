@@ -82,6 +82,8 @@ function withBackendContext(project: DefenseProject, summary: VariantSummary): D
 
 export function shouldLoadBackendProject(id: string) {
   const state = useDefenseProjectStore.getState();
+  const hasUnsaved = state.syncStatus === "dirty" || state.saveAttempt !== null || (state.savedProject !== null && businessContent(state.project) !== businessContent(state.savedProject));
+  if (state.hydrated && state.project.projectId === id && hasUnsaved) return false;
   return !state.hydrated || state.syncStatus === "unverified" || state.project.projectId !== id || state.project.source !== "backend";
 }
 
@@ -103,7 +105,7 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
 
   fetchVariants: async () => {
     const identityGeneration = sessionGeneration();
-    set({ listStatus: "loading", error: null });
+    set({ listStatus: "loading", ...(get().saveStatus !== "error" ? { error: null } : {}) });
     try {
       const res = await apiListVariants();
       if (identityGeneration !== sessionGeneration()) return;
@@ -138,6 +140,7 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
         return;
       }
       const record = result.value;
+      useDefenseProjectStore.setState({ accessError: null });
       set({ recoveryDraft: record && businessContent(record.draft) !== businessContent(server) ? record : null, recoveryStatus: "idle", recoveryError: null });
     } catch (err) {
       if (identityGeneration !== sessionGeneration()) return;
@@ -186,6 +189,11 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
     if (get().saveStatus === "saving") return;
     const projectState = useDefenseProjectStore.getState();
     const project = projectState.project;
+    if (project.projectId !== activeVariantId) return;
+    if (projectState.saveAttempt?.kind === "create") {
+      await get().saveAsNewVariant(projectState.saveAttempt.name);
+      return;
+    }
     if (!projectState.saveAttempt && projectState.syncStatus === "saved") return;
     set({ saveStatus: "saving", error: null, requestId: null, conflictState: null });
     let attempt: SaveAttempt;
@@ -194,7 +202,8 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
       try {
         const server = await apiLoadVariant(activeVariantId);
         if (identityGeneration !== sessionGeneration()) return;
-        const verification = classifySaveVerification(pendingAttempt.project, server);
+        if (useDefenseProjectStore.getState().project.projectId !== project.projectId || useDefenseProjectStore.getState().project.enterpriseId !== project.enterpriseId) { set({ saveStatus: "idle" }); return; }
+        const verification = classifySaveVerification(pendingAttempt.project, server, projectState.savedProject ?? pendingAttempt.project);
         if (verification === "saved") {
           projectState.recordSavedProject(pendingAttempt.project, server);
           set({ saveStatus: "idle", requestId: null, activeVariantName: server.projectName });
@@ -248,7 +257,8 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
       try {
         const server = await apiLoadVariant(attempt.project.projectId);
         if (identityGeneration !== sessionGeneration()) return;
-        const verification = classifySaveVerification(attempt.project, server);
+        if (useDefenseProjectStore.getState().project.projectId !== project.projectId || useDefenseProjectStore.getState().project.enterpriseId !== project.enterpriseId) { set({ saveStatus: "idle" }); return; }
+        const verification = classifySaveVerification(attempt.project, server, projectState.savedProject ?? attempt.project);
         if (verification === "saved") {
           useDefenseProjectStore.getState().recordSavedProject(attempt.project, server);
           set({ saveStatus: "idle", requestId: requestId(err), activeVariantName: get().activeVariantName ?? server.projectName });

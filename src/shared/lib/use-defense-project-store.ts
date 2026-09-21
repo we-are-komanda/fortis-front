@@ -66,6 +66,7 @@ type DefenseProjectState = {
   acceptServerProject: (project: DefenseProject) => void;
   recordSavedProject: (sent: DefenseProject, server: DefenseProject) => void;
   restoreVerifiedDraft: (record: ProjectDraft) => void;
+  discardLocalChanges: () => boolean;
   localDraftsEnabled: boolean;
   setLocalDraftsEnabled: (enabled: boolean) => void;
   setRuntimeMode: (mode: "workspace" | "demo") => void;
@@ -197,7 +198,7 @@ function applyProject(project: DefenseProject, set: (state: Partial<DefenseProje
   set({ project, savedProject, businessRevision: state.businessRevision + (changed ? 1 : 0), hydrated: true,
     syncStatus: state.accessError ? "unverified" : savedProject && businessContent(project) === businessContent(savedProject) ? "saved" : "dirty",
     budgetApplied: false, ...syncSelection(project) });
-  persist(project);
+  if (changed) persist(project);
 }
 
 export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => {
@@ -222,6 +223,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       hydrated: true, syncStatus: "saved", accessError: null, localDraftSaved: false, draftStorageError: null, ...syncSelection(project) }),
     recordSavedProject: (sent, server) => {
       const latest = get().project;
+      if (latest.projectId !== sent.projectId || latest.enterpriseId !== sent.enterpriseId) return;
       const project = { ...latest, projectId: server.projectId, enterpriseId: server.enterpriseId, version: server.version, updatedAt: server.updatedAt, source: "backend" as const };
       const baseline = { ...sent, projectId: server.projectId, enterpriseId: server.enterpriseId, version: server.version, updatedAt: server.updatedAt, source: "backend" as const };
       set({ project, savedProject: baseline, saveAttempt: null, syncStatus: businessContent(project) === businessContent(baseline) ? "saved" : "dirty", hydrated: true, ...syncSelection(project) });
@@ -229,8 +231,24 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       persist(project);
     },
     restoreVerifiedDraft: (record) => {
+      const state = get();
+      const userId = state.runtimeMode === "demo" ? "demo" : state.identityId;
+      if (record.userId !== userId || state.accessError || !state.localDraftsEnabled ||
+        (record.projectId !== "current" && (state.project.projectId !== record.projectId || state.project.enterpriseId !== record.enterpriseId))) return;
       set({ project: record.draft, savedProject: record.savedProject, saveAttempt: record.attempt?.kind === "update" ? { ...record.attempt, verificationRequired: true } : record.attempt ?? null,
         businessRevision: record.businessRevision, hydrated: true, syncStatus: "dirty", localDraftSaved: true, draftStorageError: null, accessError: null, ...syncSelection(record.draft) });
+    },
+    discardLocalChanges: () => {
+      const state = get();
+      const userId = state.runtimeMode === "demo" ? "demo" : state.identityId;
+      if (userId && state.project.enterpriseId) {
+        const result = removeProjectDraft({ userId, enterpriseId: state.project.enterpriseId, projectId: state.project.projectId }, state.localDraftsEnabled || state.localDraftSaved);
+        if (!result.ok) { set({ draftStorageError: result.error }); return false; }
+      }
+      const project = state.savedProject ?? createWorkspaceDefenseProject();
+      set({ project, saveAttempt: null, businessRevision: 0, localDraftSaved: false, draftStorageError: null,
+        syncStatus: state.accessError ? "unverified" : state.savedProject ? "saved" : "unverified", ...syncSelection(project) });
+      return true;
     },
     localDraftsEnabled: false,
     setLocalDraftsEnabled: (localDraftsEnabled) => set({ localDraftsEnabled }),
@@ -430,7 +448,6 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         layers: get().project.layers.map((layer) => ({ ...layer, isActive: layer.id === layerId })),
       };
       set({ project, ...syncSelection(project) });
-      persist(project);
     },
     setBaseObjectCenter: (center) => {
       const current = get().project.baseObject.center;
@@ -455,7 +472,6 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       const preview = get().assetLibraryPreview;
       set({ project, ...syncSelection(project), assetLibraryPreview: preview?.baseProject === before
         ? {...preview, baseProject: project} : preview });
-      persist(project);
     },
     selectObject: (objectId) => {
       const object = objectId ? get().project.placedObjects.find((item) => item.id === objectId) : null;
@@ -467,7 +483,6 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         layers: get().project.layers.map((layer) => ({ ...layer, isActive: object ? layer.id === object.layerId : layer.id === get().project.activeLayerId })),
       };
       set({ project, ...syncSelection(project) });
-      persist(project);
     },
     setAssetQuantity: (assetId, quantity) => applyProject(setAssetQuantityInProject(get().project, assetId, quantity), set),
     placeObject: (assetId, layerId, coordinates, patch) => {

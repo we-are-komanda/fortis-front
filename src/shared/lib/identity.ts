@@ -1,4 +1,4 @@
-import { useSessionStore, setAuthenticatedIdentity } from "./session-state";
+import { useSessionStore, setAuthenticatedIdentity, sessionGeneration } from "./session-state";
 import { useDefenseProjectStore as projects } from "./use-defense-project-store";
 import { useDefenseVariantsStore as variants } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { useDefenseStudioStore as studio } from "@/modules/drone-defense/domain/use-defense-studio-store";
@@ -21,7 +21,29 @@ export function markProjectInaccessible(status: number) {
 }
 
 export async function logout() {
- setAuthenticatedIdentity(null);
+ const generation = sessionGeneration();
  const response = await fetch("/api/auth/logout", { method: "POST" });
+ if (generation !== sessionGeneration()) throw new Error("Сессия изменилась. Повторите выход из текущего аккаунта.");
  if (!response.ok) throw new Error("Не удалось завершить сессию. Повторите выход.");
+ setAuthenticatedIdentity(null);
+}
+
+export function isProjectSaveInFlight() {
+ return variants.getState().saveStatus === "saving";
+}
+
+export function useProjectSaveInFlight() {
+ return variants((state) => state.saveStatus === "saving");
+}
+
+export async function saveBeforeLogout(name: string): Promise<boolean> {
+ if (isProjectSaveInFlight()) return false;
+ const generation = sessionGeneration();
+ const attempt = projects.getState().saveAttempt;
+ if (attempt?.kind === "create") await variants.getState().saveAsNewVariant(attempt.name);
+ else if (variants.getState().activeVariantId) await variants.getState().overwriteActiveVariant();
+ else if (name.trim()) await variants.getState().saveAsNewVariant(name.trim());
+ const current = projects.getState();
+ const result = variants.getState();
+ return generation === sessionGeneration() && current.syncStatus === "saved" && !current.saveAttempt && !current.accessError && result.saveStatus === "idle";
 }

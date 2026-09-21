@@ -108,6 +108,7 @@ export async function sendProjectSaveAttempt(attempt: SaveAttempt): Promise<Vari
     body: attempt.body,
   });
   validateVariantSummary(data);
+  if (data.enterpriseId !== undefined && data.enterpriseId !== attempt.project.enterpriseId) throw new FortisProtocolError();
   if (attempt.kind === "update" && (data.projectId !== attempt.project.projectId || data.version !== (attempt.project.version ?? 0) + 1)) throw new FortisProtocolError();
   return data;
 }

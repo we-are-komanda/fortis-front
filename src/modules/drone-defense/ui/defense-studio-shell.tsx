@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useRef } from "react";
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
@@ -15,7 +15,6 @@ import { useDefenseStudioStore } from "@/modules/drone-defense/domain/use-defens
 import { canOpenCapability } from "@/shared/config/product-capabilities";
 import { useRuntimeMode } from "@/shared/ui/runtime-provider";
 import { VariantSaveButton, VariantStatusButton } from "@/modules/drone-defense/ui/variant-selector";
-import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
 import { useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
 
 type DefenseStudioShellProps = {
@@ -31,23 +30,20 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
   const pathname = usePathname();
   const runtimeMode = useRuntimeMode();
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const activeVariantId = useDefenseVariantsStore((state) => state.activeVariantId);
+  const previousVariantId = useRef(activeVariantId);
+  useEffect(() => {
+    const previous = previousVariantId.current;
+    previousVariantId.current = activeVariantId;
+    if (!activeVariantId || activeVariantId === previous || searchParams.get("projectId") === activeVariantId) return;
+    const query = new URLSearchParams(searchParams.toString());
+    query.delete("project");
+    query.set("projectId", activeVariantId);
+    router.replace(`${pathname}?${query.toString()}`, { scroll: false });
+  }, [activeVariantId, pathname, router, searchParams]);
   const view = useDefenseStudioStore((state) => state.view);
   const setView = useDefenseStudioStore((state) => state.setView);
-  const syncStatus = useDefenseProjectStore((state) => state.syncStatus);
-  const saveAttempt = useDefenseProjectStore((state) => state.saveAttempt);
-  const saveStatus = useDefenseVariantsStore((state) => state.saveStatus);
-  const hasPendingSave = syncStatus === "dirty" || saveAttempt !== null || saveStatus === "saving";
-
-  useEffect(() => {
-    if (!hasPendingSave) return;
-    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", warnBeforeUnload);
-    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
-  }, [hasPendingSave]);
-
   const normalizedPathname = pathname.replace(/\/$/, "");
   const isPrototype = normalizedPathname === "/prototype";
   const isCalculator = normalizedPathname === "/calculator";

@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, RefreshCw, ShieldCheck } from "lucide-react";
 import { compareBackendProjects, type BackendProjectCompare } from "@/modules/defense-calculator/infra/backend-project-api";
-import { fetchEnterprises } from "@/modules/drone-defense/infra/enterprise-api";
+import { fetchEnterprises, getEnterprise } from "@/modules/drone-defense/infra/enterprise-api";
 import { useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { createWorkspaceDefenseProject, setProjectBaseObject } from "@/shared/lib/defense-project";
 import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
@@ -12,7 +12,7 @@ import { businessContent } from "@/shared/lib/project-save-state";
 import { readProjectDraft, type ProjectDraft } from "@/shared/lib/project-draft-storage";
 import type { ProtectedObjectOption } from "@/shared/types/defense-project";
 
-type PendingTransition = { kind: "create"; enterprise: ProtectedObjectOption } | { kind: "open"; projectId: string };
+type PendingTransition = { kind: "create"; enterprise: ProtectedObjectOption } | { kind: "open"; projectId: string } | { kind: "enterprise"; enterpriseId: string };
 
 export function ProjectWorkspacePage() {
   const router = useRouter();
@@ -26,12 +26,14 @@ export function ProjectWorkspacePage() {
   const [compareB, setCompareB] = useState("");
   const [compareResult, setCompareResult] = useState<BackendProjectCompare | null>(null);
   const [compareLoading, setCompareLoading] = useState(false);
+  const compareGeneration = useRef(0);
   const [pendingTransition, setPendingTransition] = useState<PendingTransition | null>(null);
   const [transitionSaveName, setTransitionSaveName] = useState("");
   const [transitionBusy, setTransitionBusy] = useState(false);
   const [recoveryDraft, setRecoveryDraft] = useState<ProjectDraft | null>(null);
   const [recoveryError, setRecoveryError] = useState<string | null>(null);
   const [recoveryScopeEnterpriseId, setRecoveryScopeEnterpriseId] = useState<string | null>(null);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
 
   const { variants, listStatus, saveStatus, error, fetchVariants, loadVariant, saveAsNewVariant, overwriteActiveVariant } =
     useDefenseVariantsStore();
@@ -101,6 +103,8 @@ export function ProjectWorkspacePage() {
   function createProject(enterprise: ProtectedObjectOption) {
     setWorkspaceError(null);
     const baseProject = setProjectBaseObject(createWorkspaceDefenseProject(), enterprise);
+    useDefenseProjectStore.setState({ accessError: null });
+    useDefenseVariantsStore.setState({ activeVariantId: null, activeVariantName: null, conflictState: null });
     replaceProject({
       ...baseProject,
       enterpriseId: enterprise.enterpriseId,
@@ -113,7 +117,7 @@ export function ProjectWorkspacePage() {
   async function finishCreate(name: string) {
     await saveAsNewVariant(name);
     const state = useDefenseVariantsStore.getState();
-    if (state.error || state.activeVariantId === null || useDefenseProjectStore.getState().syncStatus !== "saved") {
+    if (state.saveStatus !== "idle" || state.activeVariantId === null || useDefenseProjectStore.getState().syncStatus !== "saved") {
       setWorkspaceError(state.error);
       return;
     }
@@ -131,7 +135,20 @@ export function ProjectWorkspacePage() {
     router.push(`/prototype?projectId=${encodeURIComponent(state.activeVariantId ?? "")}`);
   }
 
+  function finishEnterpriseSwitch(enterpriseId: string) {
+    compareGeneration.current++;
+    setCompareA("");
+    setCompareB("");
+    setCompareResult(null);
+    setCompareLoading(false);
+    setRecoveryDraft(null);
+    setRecoveryError(null);
+    setWorkspaceError(null);
+    setSelectedEnterpriseId(enterpriseId);
+  }
+
   function requestTransition(target: PendingTransition) {
+    if (target.kind === "enterprise" && target.enterpriseId === selectedEnterpriseId) return;
     if (target.kind === "open" && useDefenseVariantsStore.getState().activeVariantId === target.projectId) {
       router.push(`/prototype?projectId=${encodeURIComponent(target.projectId)}`);
       return;
@@ -140,7 +157,8 @@ export function ProjectWorkspacePage() {
     const hasUnsaved = projectSyncStatus === "dirty" || saveAttempt !== null || saveStatus === "saving" || (projectSyncStatus === "unverified" && Boolean(project.enterpriseId));
     if (!hasUnsaved) {
       if (target.kind === "create") createProject(target.enterprise);
-      else void finishOpenProject(target.projectId);
+      else if (target.kind === "open") void finishOpenProject(target.projectId);
+      else finishEnterpriseSwitch(target.enterpriseId);
       return;
     }
     setTransitionSaveName(project.projectName);
@@ -154,48 +172,77 @@ export function ProjectWorkspacePage() {
       setPendingTransition(null);
       return;
     }
+    if (useDefenseVariantsStore.getState().saveStatus === "saving") return;
     setTransitionBusy(true);
     try {
       if (choice === "save") {
+        const attempt = useDefenseProjectStore.getState().saveAttempt;
         const activeId = useDefenseVariantsStore.getState().activeVariantId;
-        if (activeId) await overwriteActiveVariant();
+        if (attempt?.kind === "create") await saveAsNewVariant(attempt.name);
+        else if (activeId) await overwriteActiveVariant();
         else if (transitionSaveName.trim()) await saveAsNewVariant(transitionSaveName.trim());
         const current = useDefenseProjectStore.getState();
         const variantsState = useDefenseVariantsStore.getState();
-        if (current.syncStatus !== "saved" || variantsState.saveStatus !== "idle" || variantsState.error) {
+        if (current.syncStatus !== "saved" || current.saveAttempt || current.accessError || variantsState.saveStatus !== "idle") {
           setWorkspaceError(variantsState.error ?? "Сохранение не завершено; переход отменён, черновик сохранён.");
           return;
         }
+      } else if (!useDefenseProjectStore.getState().discardLocalChanges()) {
+        setWorkspaceError(useDefenseProjectStore.getState().draftStorageError);
+        return;
       }
       setPendingTransition(null);
       if (target.kind === "create") createProject(target.enterprise);
-      else await finishOpenProject(target.projectId);
+      else if (target.kind === "open") await finishOpenProject(target.projectId);
+      else finishEnterpriseSwitch(target.enterpriseId);
     } finally {
       setTransitionBusy(false);
     }
   }
 
-  function restoreLocalDraft() {
+  async function restoreLocalDraft() {
     const record = recoveryDraft;
-    if (!record || !identityId || !enterprises.some((item) => item.enterpriseId === record.enterpriseId)) return;
+    if (!record || !identityId || recoveryBusy || saveStatus === "saving") return;
     const current = useDefenseProjectStore.getState();
     if (current.identityId !== record.userId || selectedEnterpriseId !== record.enterpriseId) return;
     if ((current.syncStatus === "dirty" || current.project.projectId !== "current") && !window.confirm("Заменить текущий проект восстановленным локальным черновиком? Сервер не изменится до явного сохранения.")) return;
-    restoreVerifiedDraft(record);
-    setRecoveryDraft(null);
+    setRecoveryBusy(true);
+    setRecoveryError(null);
+    try {
+      const enterprise = await getEnterprise(record.enterpriseId);
+      const latest = useDefenseProjectStore.getState();
+      if (enterprise.enterpriseId !== record.enterpriseId || latest.identityId !== record.userId || latest.project !== current.project) {
+        setRecoveryError("Текущий проект или доступ изменился. Повторите восстановление явно.");
+        return;
+      }
+      restoreVerifiedDraft(record);
+      if (useDefenseProjectStore.getState().project !== record.draft) {
+        setRecoveryError("Восстановление недоступно в текущем контексте. Откройте проект заново.");
+        return;
+      }
+      useDefenseVariantsStore.setState({ activeVariantId: null, activeVariantName: null, conflictState: null });
+      setRecoveryDraft(null);
+    } catch {
+      setRecoveryError("Доступ к предприятию не подтверждён. Локальный черновик не восстановлен; повторите после восстановления доступа.");
+    } finally {
+      setRecoveryBusy(false);
+    }
   }
 
   async function handleCompare() {
     if (!compareA || !compareB) return;
     setWorkspaceError(null);
     setCompareLoading(true);
+    const generation = ++compareGeneration.current;
     try {
-      setCompareResult(await compareBackendProjects(compareA, compareB));
+      const result = await compareBackendProjects(compareA, compareB);
+      if (generation === compareGeneration.current) setCompareResult(result);
     } catch {
+      if (generation !== compareGeneration.current) return;
       setCompareResult(null);
       setWorkspaceError("Не удалось сравнить выбранные конфигурации.");
     } finally {
-      setCompareLoading(false);
+      if (generation === compareGeneration.current) setCompareLoading(false);
     }
   }
 
@@ -243,7 +290,8 @@ export function ProjectWorkspacePage() {
                 <button
                   key={enterprise.enterpriseId}
                   type="button"
-                  onClick={() => setSelectedEnterpriseId(enterprise.enterpriseId)}
+                  onClick={() => requestTransition({ kind: "enterprise", enterpriseId: enterprise.enterpriseId })}
+                  disabled={recoveryBusy}
                   className={`rounded-md border px-3 py-2 text-left transition ${
                     selectedEnterprise?.enterpriseId === enterprise.enterpriseId
                       ? "border-blue-500 bg-blue-50 text-blue-950"
@@ -377,7 +425,7 @@ export function ProjectWorkspacePage() {
         {recoveryDraft && recoveryScopeEnterpriseId === selectedEnterpriseId ? (
           <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
             <span>Для выбранного предприятия найден локальный черновик. Доступ к предприятию подтверждён; восстановление не отправляет его на сервер.</span>
-            <button type="button" onClick={restoreLocalDraft} className="min-h-11 rounded-md border border-amber-400 bg-white px-4 font-semibold">Восстановить черновик</button>
+            <button type="button" onClick={() => void restoreLocalDraft()} disabled={recoveryBusy || saveStatus === "saving"} className="min-h-11 rounded-md border border-amber-400 bg-white px-4 font-semibold">Восстановить черновик</button>
           </div>
         ) : null}
         {pendingTransition ? (
@@ -390,8 +438,8 @@ export function ProjectWorkspacePage() {
               ) : null}
               <div className="mt-5 flex flex-wrap justify-end gap-2">
                 <button type="button" onClick={() => void resolveTransition("stay")} disabled={transitionBusy} className="min-h-11 rounded-md border border-slate-300 px-4 font-semibold">Остаться</button>
-                <button type="button" onClick={() => void resolveTransition("discard")} disabled={transitionBusy} className="min-h-11 rounded-md border border-rose-300 px-4 font-semibold text-rose-700">Отказаться и продолжить</button>
-                <button type="button" onClick={() => void resolveTransition("save")} disabled={transitionBusy || (!useDefenseVariantsStore.getState().activeVariantId && !transitionSaveName.trim())} className="min-h-11 rounded-md bg-blue-600 px-4 font-semibold text-white disabled:opacity-50">Сохранить и продолжить</button>
+                <button type="button" onClick={() => void resolveTransition("discard")} disabled={transitionBusy || saveStatus === "saving"} className="min-h-11 rounded-md border border-rose-300 px-4 font-semibold text-rose-700">Отказаться и продолжить</button>
+                <button type="button" onClick={() => void resolveTransition("save")} disabled={transitionBusy || saveStatus === "saving" || (!useDefenseVariantsStore.getState().activeVariantId && !transitionSaveName.trim())} className="min-h-11 rounded-md bg-blue-600 px-4 font-semibold text-white disabled:opacity-50">Сохранить и продолжить</button>
               </div>
             </div>
           </div>

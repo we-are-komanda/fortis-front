@@ -160,8 +160,9 @@ async function main() {
   assert(useDefenseVariantsStore.getState().saveStatus === "error", "409 must keep saveStatus error");
   assert(useDefenseVariantsStore.getState().conflictState?.projectId === "D", "409 must expose conflict project id");
   assert(
-    useDefenseVariantsStore.getState().error?.includes("перезагруз"),
-    "409 must tell the user to reload the current version",
+    useDefenseVariantsStore.getState().error?.includes("актуальную версию") &&
+      useDefenseVariantsStore.getState().error?.includes("отдельным вариантом"),
+    "409 must offer the current server version or a separate variant",
   );
   console.log("overwriteActiveVariant conflict: OK");
 
