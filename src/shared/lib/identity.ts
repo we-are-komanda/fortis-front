@@ -36,7 +36,7 @@ export function useProjectSaveInFlight() {
  return variants((state) => state.saveStatus === "saving");
 }
 
-export async function saveBeforeLogout(name: string): Promise<boolean> {
+export async function saveCurrentProject(name: string): Promise<boolean> {
  if (isProjectSaveInFlight()) return false;
  const generation = sessionGeneration();
  const attempt = projects.getState().saveAttempt;
@@ -47,3 +47,5 @@ export async function saveBeforeLogout(name: string): Promise<boolean> {
  const result = variants.getState();
  return generation === sessionGeneration() && current.syncStatus === "saved" && !current.saveAttempt && !current.accessError && result.saveStatus === "idle";
 }
+
+export const saveBeforeLogout = saveCurrentProject;

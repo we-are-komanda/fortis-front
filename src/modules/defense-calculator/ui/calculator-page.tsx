@@ -62,7 +62,7 @@ export function CalculatorPage() {
         <h1 className="mt-2 text-3xl font-semibold tracking-tight">Стоимость конфигурации</h1><p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">{calculationLimitation}</p>
       </header>
       {!runtimeMode || blocked ? <p role="status">Ожидается проверка доступа к проекту.</p> : error ? <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4"><p>{error}</p>{saved && <button type="button" className="mt-3 min-h-11 rounded-lg border border-slate-300 bg-white px-4" onClick={retry}>Повторить</button>}</div> : cost ? <CostProjectionView projection={cost} /> : <p role="status">Загружается расчёт сохранённой версии…</p>}
-      {runtimeMode === "workspace" && !blocked && <div className="mt-6"><ProjectBudgetPanel /></div>}
+      {runtimeMode === "workspace" && !blocked && <div className="mt-6 space-y-4"><ProjectBudgetPanel /><Link href="/workspace#configuration-comparison" className="inline-flex min-h-11 items-center rounded-md border border-slate-300 bg-white px-4 text-blue-700">Сравнить сохранённые версии</Link></div>}
     </div>
   </main>;
 }

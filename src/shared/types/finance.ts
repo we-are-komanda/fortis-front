@@ -73,6 +73,8 @@ export type CostProjection = {
   unknownPriceObjectIds: string[];
   warnings: Issue[];
 };
+export type CompareSide = { identity: CalculationIdentity; name: string; updatedAt: string; cost: CostProjection; budget: BudgetProjection };
+export type CompareResult = { enterpriseId: string; a: CompareSide; b: CompareSide; differenceMinor: string | null; differencePercent: string | null; warnings: Issue[] };
 
 // A local preview has no authoritative calculation identity or server digest.
 export type DraftCostProjection = Omit<CostProjection, "identity"> & {

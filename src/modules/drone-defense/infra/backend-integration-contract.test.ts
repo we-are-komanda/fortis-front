@@ -13,13 +13,17 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+function compareSide(projectId: string, projectVersion: number) {
+  const identity = {projectId,projectVersion,calculationVersion:"cost-rub-v1",snapshotDigest:"a".repeat(64),inputDataVersions:{}};
+  return { identity, name: projectId, updatedAt: "2026-09-21T00:00:00Z", cost: {identity,currency:"RUB",lines:[],byLayer:[],byType:[],totalMinor:"0",knownSubtotalMinor:"0",isComplete:true,unknownPriceObjectIds:[],warnings:[]}, budget: {identity,config:{budgetMode:"unlimited",budgetLimitMinor:null},spentMinor:"0",remainingMinor:null,status:"unlimited"} };
+}
 Object.defineProperty(globalThis, "fetch", {
   value: async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ input, init });
     return Response.json(String(input).includes("/projects/cost") ? {
       identity: {projectId:"proj-1",projectVersion:7,calculationVersion:"cost-rub-v1",snapshotDigest:"a".repeat(64),inputDataVersions:{}},
       currency:"RUB",lines:[],byLayer:[],byType:[],totalMinor:"0",knownSubtotalMinor:"0",isComplete:true,unknownPriceObjectIds:[],warnings:[],
-    } : {ok:true});
+    } : String(input).includes("/projects/compare") ? {enterpriseId:"E",a:compareSide("proj-1",7),b:compareSide("proj-2",3),differenceMinor:"0",differencePercent:null,warnings:[]} : {ok:true});
   },
   configurable: true,
   writable: true,
@@ -37,7 +41,7 @@ async function main() {
 
   await getBackendProjectCost("proj-1", 7);
   await getBackendProjectReport("proj-1", { hideCost: true });
-  await compareBackendProjects("proj-1", "proj-2");
+  await compareBackendProjects({projectId:"proj-1",projectVersion:7}, {projectId:"proj-2",projectVersion:3}, "E");
 
   assert(String(calls[0]?.input) === "/api/v1/projects/cost?projectId=proj-1&projectVersion=7", "cost helper must call /projects/cost");
   assert(
@@ -45,8 +49,8 @@ async function main() {
     "report helper must call /projects/report with hideCost",
   );
   assert(
-    String(calls[2]?.input) === "/api/v1/projects/compare?id1=proj-1&id2=proj-2",
-    "compare helper must call /projects/compare",
+    String(calls[2]?.input) === "/api/v1/projects/compare?projectIdA=proj-1&projectVersionA=7&projectIdB=proj-2&projectVersionB=3",
+    "compare helper must pin both saved revisions",
   );
 
   const proxySource = readFileSync("src/proxy.ts", "utf8");

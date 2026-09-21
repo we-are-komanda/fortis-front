@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, RefreshCw, ShieldCheck } from "lucide-react";
-import { compareBackendProjects, type BackendProjectCompare } from "@/modules/defense-calculator/infra/backend-project-api";
+import { ConfigurationComparison } from "@/modules/defense-calculator/ui/configuration-comparison";
 import { fetchEnterprisePage, getEnterprise } from "@/modules/drone-defense/infra/enterprise-api";
 import { useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { createWorkspaceDefenseProject, setProjectBaseObject } from "@/shared/lib/defense-project";
@@ -24,11 +24,6 @@ export function ProjectWorkspacePage() {
   const [pageOffset, setPageOffset] = useState(0);
   const [newProjectName, setNewProjectName] = useState("Новая конфигурация");
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [compareA, setCompareA] = useState("");
-  const [compareB, setCompareB] = useState("");
-  const [compareResult, setCompareResult] = useState<BackendProjectCompare | null>(null);
-  const [compareLoading, setCompareLoading] = useState(false);
-  const compareGeneration = useRef(0);
   const [pendingTransition, setPendingTransition] = useState<PendingTransition | null>(null);
   const [transitionSaveName, setTransitionSaveName] = useState("");
   const [transitionBusy, setTransitionBusy] = useState(false);
@@ -54,11 +49,6 @@ export function ProjectWorkspacePage() {
         setEnterpriseStatus("loading");
         setEnterprises([]);
         setPageOffset(0);
-        compareGeneration.current++;
-        setCompareA("");
-        setCompareB("");
-        setCompareResult(null);
-        setCompareLoading(false);
         void fetchVariants(null);
         const items: ProtectedObjectOption[] = [];
         let total = 0;
@@ -136,11 +126,6 @@ export function ProjectWorkspacePage() {
   const currentList = Boolean(selectedEnterprise && listQuery?.enterpriseId === selectedEnterpriseId && listQuery.offset === pageOffset);
 
   function changePage(offset: number) {
-    compareGeneration.current++;
-    setCompareA("");
-    setCompareB("");
-    setCompareResult(null);
-    setCompareLoading(false);
     setPageOffset(offset);
   }
 
@@ -175,11 +160,6 @@ export function ProjectWorkspacePage() {
   }
 
   function finishEnterpriseSwitch(enterpriseId: string) {
-    compareGeneration.current++;
-    setCompareA("");
-    setCompareB("");
-    setCompareResult(null);
-    setCompareLoading(false);
     setRecoveryDraft(null);
     setRecoveryError(null);
     setWorkspaceError(null);
@@ -267,23 +247,6 @@ export function ProjectWorkspacePage() {
       setRecoveryError("Доступ к предприятию не подтверждён. Локальный черновик не восстановлен; повторите после восстановления доступа.");
     } finally {
       setRecoveryBusy(false);
-    }
-  }
-
-  async function handleCompare() {
-    if (!compareA || !compareB) return;
-    setWorkspaceError(null);
-    setCompareLoading(true);
-    const generation = ++compareGeneration.current;
-    try {
-      const result = await compareBackendProjects(compareA, compareB);
-      if (generation === compareGeneration.current) setCompareResult(result);
-    } catch {
-      if (generation !== compareGeneration.current) return;
-      setCompareResult(null);
-      setWorkspaceError("Не удалось сравнить выбранные конфигурации.");
-    } finally {
-      if (generation === compareGeneration.current) setCompareLoading(false);
     }
   }
 
@@ -421,63 +384,7 @@ export function ProjectWorkspacePage() {
               ) : null}
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-white p-4">
-              <h2 className="text-sm font-bold uppercase tracking-wide text-slate-500">Сравнение конфигураций</h2>
-              <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
-                <select
-                  aria-label="Первая конфигурация"
-                  value={compareA}
-                  onChange={(event) => setCompareA(event.target.value)}
-                  className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-blue-500"
-                >
-                  <option value="">Первая конфигурация</option>
-                  {filteredVariants.map((project) => (
-                    <option key={project.projectId} value={project.projectId}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  aria-label="Вторая конфигурация"
-                  value={compareB}
-                  onChange={(event) => setCompareB(event.target.value)}
-                  className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm outline-none focus:border-blue-500"
-                >
-                  <option value="">Вторая конфигурация</option>
-                  {filteredVariants.map((project) => (
-                    <option key={project.projectId} value={project.projectId}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => void handleCompare()}
-                  disabled={!compareA || !compareB || compareLoading}
-                  className="h-10 rounded-md bg-slate-900 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Сравнить
-                </button>
-              </div>
-              {compareResult ? (
-                <dl className="mt-4 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-md bg-slate-50 p-3">
-                    <dt className="text-xs text-slate-500">Разница стоимости</dt>
-                    <dd className="mt-1 font-mono text-lg font-bold text-slate-900">
-                      {compareResult.diff.costDeltaMln.toLocaleString("ru-RU")} млн ₽
-                    </dd>
-                  </div>
-                  <div className="rounded-md bg-slate-50 p-3">
-                    <dt className="text-xs text-slate-500">Разница единиц</dt>
-                    <dd className="mt-1 font-mono text-lg font-bold text-slate-900">{compareResult.diff.unitCountDelta}</dd>
-                  </div>
-                  <div className="rounded-md bg-slate-50 p-3">
-                    <dt className="text-xs text-slate-500">Разница конфликтов</dt>
-                    <dd className="mt-1 font-mono text-lg font-bold text-slate-900">{compareResult.diff.conflictCountDelta}</dd>
-                  </div>
-                </dl>
-              ) : null}
-            </div>
+            <ConfigurationComparison enterpriseId={selectedEnterprise?.enterpriseId ?? ""} projects={filteredVariants} />
           </div>
         </section>
         {recoveryScopeEnterpriseId === selectedEnterpriseId && recoveryError ? <div role="alert" className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{recoveryError}</div> : null}

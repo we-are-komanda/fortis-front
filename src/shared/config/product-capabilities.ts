@@ -6,7 +6,7 @@ export const productCapabilities = {
   ownData: { status: "available", title: "Собственные исходные данные", description: "Опишите объект и задайте параметры своей конфигурации." },
   versions: { status: "not_released", title: "Сохранение версий", description: "Проверка сохранения версий ещё не завершена." },
   calculation: { status: "available", title: "Расчёт по введённым ценам", href: "/calculator", description: "Стоимость размещённых объектов по указанным ценам с отметками о неполных данных." },
-  compare: { status: "not_released", title: "Сравнение вариантов", description: "Проверка сравнения сохранённых вариантов ещё не завершена." },
+  compare: { status: "available", title: "Сравнение вариантов", href: "/workspace#configuration-comparison", description: "Состав и стоимость двух выбранных сохранённых версий одного предприятия." },
   report: { status: "not_released", title: "Отчёт для согласования", description: "Проверка состава и выгрузки отчёта ещё не завершена." },
   operational: { status: "demo", title: "Оперативная платформа", href: "/dashboard", description: "Синтетические экраны мониторинга и управления." },
   retrospective: { status: "demo", title: "Ретроспективный анализ", href: "/retrospective-analysis", description: "Демонстрационный модуль вне рабочего релиза." },

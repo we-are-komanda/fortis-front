@@ -11,7 +11,9 @@ test("capability policy does not promote demo or unaccepted functionality into w
     assert.equal(canOpenCapability(capability, "workspace"), status === "available", capability);
     assert.equal(canOpenCapability(capability, "demo"), status !== "not_released", capability);
   }
-  for (const capability of ["compare", "report"] as const) assert.equal(productCapabilities[capability].status, "not_released");
+  assert.equal(productCapabilities.compare.status, "available");
+  assert.equal(productCapabilities.compare.href, "/workspace#configuration-comparison");
+  assert.equal(productCapabilities.report.status, "not_released");
 });
 
 test("unavailable notice has a working-zone exit and demo marker stays fixed", () => {

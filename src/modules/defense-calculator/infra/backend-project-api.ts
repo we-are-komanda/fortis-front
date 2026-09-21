@@ -1,5 +1,5 @@
 import { readDataProvenance } from "@/shared/lib/data-provenance";
-import type { CostProjection } from "@/shared/types/finance";
+import type { CompareResult, CostProjection, ProjectRef } from "@/shared/types/finance";
 import { readBudgetProjection, readBudgetCheck } from "@/shared/lib/budget-projection";
 import { FortisProtocolError, isRecord, getApiJson, postApiJson } from "@/shared/lib/api-client";
 
@@ -34,21 +34,6 @@ export type BackendProjectReport = {
   hideCost: boolean;
 };
 
-export type BackendProjectCompare = {
-  projectA: unknown;
-  projectB: unknown;
-  diff: {
-    objectCountDelta: number;
-    unitCountDelta: number;
-    echelonCountDelta: number;
-    categoryCountDelta: number;
-    conflictCountDelta: number;
-    coveredObjCountDelta: number;
-    costDeltaMln: number;
-    byEchelon: unknown[];
-  };
-};
-
 export async function getBackendBudgetConfig(projectId: string, projectVersion: number, signal?: AbortSignal) {
   if (!Number.isSafeInteger(projectVersion) || projectVersion < 1) throw new FortisProtocolError();
   return readBudgetProjection(await getApiJson<unknown>("/projects/budget", { query: { projectId, projectVersion }, signal }), projectId, projectVersion);
@@ -57,6 +42,10 @@ export async function getBackendBudgetConfig(projectId: string, projectVersion: 
 export async function getBackendProjectCost(projectId: string, projectVersion: number, signal?: AbortSignal): Promise<CostProjection> {
   if (!Number.isSafeInteger(projectVersion) || projectVersion < 1) throw new FortisProtocolError();
   const value = await getApiJson<unknown>("/projects/cost", { query: { projectId, projectVersion }, signal });
+  return readCostProjection(value, projectId, projectVersion);
+}
+
+function readCostProjection(value: unknown, projectId: string, projectVersion: number): CostProjection {
   if (!isRecord(value) || !isRecord(value.identity) || value.identity.projectId !== projectId || value.identity.projectVersion !== projectVersion ||
       typeof value.identity.calculationVersion !== "string" || !value.identity.calculationVersion ||
       typeof value.identity.snapshotDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.identity.snapshotDigest) ||
@@ -124,8 +113,31 @@ export function getBackendProjectReport(projectId: string, options: { hideCost?:
   });
 }
 
-export function compareBackendProjects(projectId1: string, projectId2: string) {
-  return getApiJson<BackendProjectCompare>("/projects/compare", {
-    query: { id1: projectId1, id2: projectId2 },
-  });
+export async function compareBackendProjects(a: ProjectRef, b: ProjectRef, enterpriseId: string, signal?: AbortSignal): Promise<CompareResult> {
+  if (![a,b].every(ref => typeof ref.projectId === "string" && ref.projectId.trim() && Number.isSafeInteger(ref.projectVersion) && ref.projectVersion > 0) ||
+      a.projectId === b.projectId && a.projectVersion === b.projectVersion || !enterpriseId.trim()) throw new FortisProtocolError();
+  const value = await getApiJson<unknown>("/projects/compare", { query: { projectIdA: a.projectId, projectVersionA: a.projectVersion, projectIdB: b.projectId, projectVersionB: b.projectVersion }, signal });
+  if (!isRecord(value) || value.enterpriseId !== enterpriseId || !Array.isArray(value.warnings)) throw new FortisProtocolError();
+  for (const [side,ref] of [[value.a,a],[value.b,b]] as const) {
+    if (!isRecord(side) || !isRecord(side.identity) || typeof side.name !== "string" || !side.name.trim() || typeof side.updatedAt !== "string" || !Number.isFinite(Date.parse(side.updatedAt))) throw new FortisProtocolError();
+    const cost = readCostProjection(side.cost, ref.projectId, ref.projectVersion);
+    const budget = readBudgetProjection(side.budget, ref.projectId, ref.projectVersion);
+    const identity = (v: unknown) => {
+      if (!isRecord(v) || !isRecord(v.inputDataVersions)) throw new FortisProtocolError();
+      return JSON.stringify([v.projectId,v.projectVersion,v.calculationVersion,v.snapshotDigest,Object.entries(v.inputDataVersions).sort(([x],[y]) => x.localeCompare(y))]);
+    };
+    if (identity(side.identity) !== identity(cost.identity) || identity(cost.identity) !== identity(budget.identity) || cost.totalMinor !== budget.spentMinor) throw new FortisProtocolError();
+  }
+  const result = value as CompareResult;
+  const totalA = result.a.cost.totalMinor, totalB = result.b.cost.totalMinor;
+  const difference = totalA === null || totalB === null ? null : BigInt(totalB) - BigInt(totalA);
+  let percent: string | null = null;
+  if (difference !== null && totalA !== null && BigInt(totalA) > BigInt(0)) {
+    const numerator = (difference < BigInt(0) ? -difference : difference) * BigInt(10000), denominator = BigInt(totalA);
+    const rounded = numerator / denominator + (numerator % denominator * BigInt(2) >= denominator ? BigInt(1) : BigInt(0));
+    percent = `${difference < BigInt(0) && rounded !== BigInt(0) ? "-" : ""}${rounded / BigInt(100)}.${String(rounded % BigInt(100)).padStart(2,"0")}`;
+  }
+  if (result.differenceMinor !== (difference === null ? null : String(difference)) || result.differencePercent !== percent ||
+      !result.warnings.every(issue => isRecord(issue) && typeof issue.code === "string" && typeof issue.message === "string" && ["info","warning","error"].includes(String(issue.severity)) && Array.isArray(issue.objectIds) && issue.objectIds.every(id=>typeof id === "string"))) throw new FortisProtocolError();
+  return result;
 }
