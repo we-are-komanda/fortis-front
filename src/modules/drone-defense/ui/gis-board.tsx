@@ -650,7 +650,7 @@ export function GisBoard({
     () =>
       [
         ...echelonModel.zones.flatMap((zone) => {
-          const layerSlug = zone.shortName.toLowerCase();
+          const layerSlug = zone.layerId;
           const isActive = zone.layerId === selectedLayerId;
           const isPreview = previewLayer?.id === zone.layerId;
           const zoneLayer = visibleMapLayers.find((layer) => layer.id === zone.layerId);
