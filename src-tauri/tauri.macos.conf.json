@@ -1,0 +1,14 @@
+{
+  "bundle": {
+    "targets": [
+      "dmg"
+    ],
+    "resources": {
+      "../.desktop-build/node-macos": "node-macos"
+    },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": "-"
+    }
+  }
+}

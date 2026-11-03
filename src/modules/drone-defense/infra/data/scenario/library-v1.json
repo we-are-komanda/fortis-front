@@ -1,0 +1,242 @@
+{
+  "scene": {
+    "id": "factory-campus",
+    "version": 1,
+    "provenance": "synthetic",
+    "radiusM": 10000,
+    "coordinateSystem": "local-enu-m",
+    "terrainVersion": 2,
+    "enterpriseModelVersion": 1,
+    "assets": {
+      "terrain": "site-v2.json#terrain",
+      "enterprise": "factory-campus@1"
+    },
+    "authorNote": "Четыре комплекса Factory BIM в исходном масштабе, сетка 2×2 на площадке 320 × 320 м: единая модель factory-campus@1 для подготовки, просмотра, сравнения и карточек. Рельеф site-v2: дороги 12 м, кроны около 9 м, ближние холмы до 70 м; общие координаты в метрах. Подготовленные записи движения и времена событий не изменены; это учебное воспроизведение, без физического расчёта."
+  },
+  "tracks": [
+    {
+      "id": "north",
+      "version": 1,
+      "sceneRef": {
+        "id": "factory-campus",
+        "version": 1
+      },
+      "label": "А",
+      "directionLabel": "Север",
+      "durationMs": 240000,
+      "samples": [
+        {
+          "tMs": 0,
+          "xM": 189,
+          "yM": 8962,
+          "zM": 1100
+        },
+        {
+          "tMs": 80000,
+          "xM": -377,
+          "yM": 6132,
+          "zM": 1100
+        },
+        {
+          "tMs": 160000,
+          "xM": 660,
+          "yM": 3491,
+          "zM": 1100
+        },
+        {
+          "tMs": 240000,
+          "xM": 566,
+          "yM": 1132,
+          "zM": 1100
+        }
+      ]
+    },
+    {
+      "id": "east",
+      "version": 1,
+      "sceneRef": {
+        "id": "factory-campus",
+        "version": 1
+      },
+      "label": "Б",
+      "directionLabel": "Восток",
+      "durationMs": 240000,
+      "samples": [
+        {
+          "tMs": 0,
+          "xM": 7547,
+          "yM": -6132,
+          "zM": 1600
+        },
+        {
+          "tMs": 80000,
+          "xM": 6509,
+          "yM": -4717,
+          "zM": 1600
+        },
+        {
+          "tMs": 160000,
+          "xM": 3774,
+          "yM": -2170,
+          "zM": 1600
+        },
+        {
+          "tMs": 240000,
+          "xM": 1604,
+          "yM": -283,
+          "zM": 1600
+        }
+      ]
+    },
+    {
+      "id": "southwest",
+      "version": 1,
+      "sceneRef": {
+        "id": "factory-campus",
+        "version": 1
+      },
+      "label": "В",
+      "directionLabel": "Юго-запад",
+      "durationMs": 240000,
+      "samples": [
+        {
+          "tMs": 0,
+          "xM": -7547,
+          "yM": -6321,
+          "zM": 1100
+        },
+        {
+          "tMs": 80000,
+          "xM": -5849,
+          "yM": -5000,
+          "zM": 1100
+        },
+        {
+          "tMs": 160000,
+          "xM": -3396,
+          "yM": -2547,
+          "zM": 1100
+        },
+        {
+          "tMs": 240000,
+          "xM": -1321,
+          "yM": -1132,
+          "zM": 1100
+        }
+      ]
+    }
+  ],
+  "exercises": [
+    {
+      "id": "exercise-north",
+      "version": 1,
+      "title": "А · Север",
+      "objective": "Знакомство с площадкой и последовательностью учебных сообщений.",
+      "sceneRef": {
+        "id": "factory-campus",
+        "version": 1
+      },
+      "trackRef": {
+        "id": "north",
+        "version": 1
+      },
+      "events": [
+        {
+          "id": "notice",
+          "atMs": 30000,
+          "kind": "notice",
+          "title": "Учебное оповещение",
+          "text": "Начало учебного сообщения, не факт срабатывания датчика."
+        },
+        {
+          "id": "question",
+          "atMs": 105000,
+          "kind": "question",
+          "title": "Контрольный вопрос",
+          "text": "Какие действия предусмотрены учебным регламентом? Ответы не собираются."
+        },
+        {
+          "id": "complete",
+          "atMs": 240000,
+          "kind": "complete",
+          "title": "Упражнение завершено",
+          "text": "Конец записи, не подтверждение готовности предприятия."
+        }
+      ]
+    },
+    {
+      "id": "exercise-east",
+      "version": 1,
+      "title": "Б · Восток",
+      "objective": "Знакомство с площадкой и последовательностью учебных сообщений.",
+      "sceneRef": {
+        "id": "factory-campus",
+        "version": 1
+      },
+      "trackRef": {
+        "id": "east",
+        "version": 1
+      },
+      "events": [
+        {
+          "id": "notice",
+          "atMs": 30000,
+          "kind": "notice",
+          "title": "Учебное оповещение",
+          "text": "Начало учебного сообщения, не факт срабатывания датчика."
+        },
+        {
+          "id": "question",
+          "atMs": 105000,
+          "kind": "question",
+          "title": "Контрольный вопрос",
+          "text": "Какие действия предусмотрены учебным регламентом? Ответы не собираются."
+        },
+        {
+          "id": "complete",
+          "atMs": 240000,
+          "kind": "complete",
+          "title": "Упражнение завершено",
+          "text": "Конец записи, не подтверждение готовности предприятия."
+        }
+      ]
+    },
+    {
+      "id": "exercise-southwest",
+      "version": 1,
+      "title": "В · Юго-запад",
+      "objective": "Знакомство с площадкой и последовательностью учебных сообщений.",
+      "sceneRef": {
+        "id": "factory-campus",
+        "version": 1
+      },
+      "trackRef": {
+        "id": "southwest",
+        "version": 1
+      },
+      "events": [
+        {
+          "id": "notice",
+          "atMs": 30000,
+          "kind": "notice",
+          "title": "Учебное оповещение",
+          "text": "Начало учебного сообщения, не факт срабатывания датчика."
+        },
+        {
+          "id": "question",
+          "atMs": 105000,
+          "kind": "question",
+          "title": "Контрольный вопрос",
+          "text": "Какие действия предусмотрены учебным регламентом? Ответы не собираются."
+        },
+        {
+          "id": "complete",
+          "atMs": 240000,
+          "kind": "complete",
+          "title": "Упражнение завершено",
+          "text": "Конец записи, не подтверждение готовности предприятия."
+        }
+      ]
+    }
+  ]
+}

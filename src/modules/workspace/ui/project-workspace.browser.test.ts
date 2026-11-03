@@ -16,7 +16,7 @@ before(async () => {
     stdin: { resolveDir: process.cwd(), loader: "tsx", contents: `
       import React from 'react'; import {createRoot} from 'react-dom/client';
       import {RuntimeProvider} from './src/shared/ui/runtime-provider';
-      import {IdentityBoundary} from './src/shared/ui/identity-boundary';
+      import {ProjectBoundary} from './src/shared/ui/project-boundary';
       import {ProjectWorkspacePage} from './src/modules/workspace/ui/project-workspace-page';
       import {VariantSelector} from './src/modules/drone-defense/ui/variant-selector';
       import {useDefenseProjectStore as projects} from './src/shared/lib/use-defense-project-store';
@@ -31,7 +31,7 @@ before(async () => {
       window.frc03={state:()=>({project:projects.getState().project,baseline:projects.getState().savedProject,
         active:variants.getState().activeVariantId,status:projects.getState().syncStatus,replacements,
         navigation:window.lastNavigation??null}),edit:()=>projects.getState().replaceProject({...projects.getState().project,projectName:'Dirty existing project'})};
-      createRoot(document.getElementById('root')).render(<RuntimeProvider><IdentityBoundary><VariantSelector/><ProjectWorkspacePage/></IdentityBoundary></RuntimeProvider>);
+      createRoot(document.getElementById('root')).render(<RuntimeProvider><ProjectBoundary><VariantSelector/><ProjectWorkspacePage/></ProjectBoundary></RuntimeProvider>);
     ` },
     bundle: true, write: false, format: "iife", platform: "browser", loader: { ".css": "empty" },
     define: { "process.env.NODE_ENV": '"production"' },
@@ -178,17 +178,6 @@ test("WS08 whitespace name never sends POST and preserves the user's input",{ski
     await expect(createButton(f.page)).toBeEnabled();await nameInput(f.page).fill("   ");
     if(await createButton(f.page).isEnabled())await createButton(f.page).click();
     await expect(nameInput(f.page)).toHaveValue("   ");assert.equal(f.creates.length,0);assert.equal((await state(f.page)).navigation,null);
-  }finally{await f.page.close();}
-});
-test("WS11 selected enterprise persists for its owner and never transfers to another identity",{skip:!enabled,timeout:20000},async()=>{
-  const f=await fixture();try{
-    await expect(projectButton(f.page,"P")).toBeVisible();await f.page.getByRole("button",{name:"Enterprise E2",exact:true}).click();
-    await expect(f.page.getByText(/Для выбранного предприятия пока нет конфигураций/)).toBeVisible();
-    await f.page.reload();await f.boot();await expect(f.page.getByText(/Для выбранного предприятия пока нет конфигураций/)).toBeVisible();await expect(projectButton(f.page,"P")).toHaveCount(0);
-    f.control.userId="user-B";f.control.enterprises=[enterprise("E1")];await f.page.evaluate(()=>window.dispatchEvent(new Event("focus")));
-    await expect(projectButton(f.page,"P")).toBeVisible();await expect(f.page.getByRole("button",{name:"Enterprise E2",exact:true})).toHaveCount(0);
-    f.control.enterprises=[];await f.page.getByRole("button",{name:"Обновить",exact:true}).click();
-    await expect(createButton(f.page)).toBeDisabled();await expect(projectButton(f.page,"P")).toHaveCount(0);
   }finally{await f.page.close();}
 });
 test("WS13 failed enterprise refresh clears stale rows and cannot look like an authorized empty state",{skip:!enabled,timeout:20000},async()=>{

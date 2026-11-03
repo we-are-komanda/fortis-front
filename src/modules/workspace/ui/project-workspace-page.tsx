@@ -289,7 +289,7 @@ export function ProjectWorkspacePage() {
               {enterpriseStatus === "idle" && enterprises.length === 0 ? (
                 <div role="status" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                   <p className="font-semibold">Нет доступных предприятий.</p>
-                  <p className="mt-2">Для создания конфигурации администратор должен назначить вашему аккаунту доступ к предприятию. После назначения нажмите «Обновить».</p>
+                  <p className="mt-2">Для создания конфигурации сначала добавьте предприятие в общий каталог. Затем нажмите «Обновить».</p>
                 </div>
               ) : null}
               {enterprises.map((enterprise) => (

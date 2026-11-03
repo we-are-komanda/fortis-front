@@ -1,0 +1,52 @@
+[
+  {
+    "id": "M01-pump",
+    "triangles": 119990,
+    "dimensionsM": [
+      3,
+      1.486,
+      0.995
+    ],
+    "bytes": 14410228
+  },
+  {
+    "id": "M03-heat-exchanger",
+    "triangles": 49998,
+    "dimensionsM": [
+      7,
+      2.275,
+      1.607
+    ],
+    "bytes": 8273752
+  },
+  {
+    "id": "M04-cooling-tower",
+    "triangles": 79982,
+    "dimensionsM": [
+      7.996,
+      4.298,
+      4.463
+    ],
+    "bytes": 13147140
+  },
+  {
+    "id": "M07-scrubber",
+    "triangles": 60000,
+    "dimensionsM": [
+      3.502,
+      9.999,
+      2.632
+    ],
+    "bytes": 9259548
+  },
+  {
+    "id": "M16-tanker-truck",
+    "triangles": 79994,
+    "dimensionsM": [
+      11.996,
+      3.309,
+      2.864
+    ],
+    "bytes": 12447076
+  }
+]

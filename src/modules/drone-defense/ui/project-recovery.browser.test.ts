@@ -17,7 +17,7 @@ before(async () => {
       import React from 'react'; import {createRoot} from 'react-dom/client';
       import {ConfigProvider} from 'antd';
       import {RuntimeProvider} from './src/shared/ui/runtime-provider';
-      import {IdentityBoundary} from './src/shared/ui/identity-boundary';
+      import {ProjectBoundary} from './src/shared/ui/project-boundary';
       import {ProjectWorkspacePage} from './src/modules/workspace/ui/project-workspace-page';
       import {VariantSelector} from './src/modules/drone-defense/ui/variant-selector';
       import {useDefenseProjectStore as projects} from './src/shared/lib/use-defense-project-store';
@@ -37,7 +37,7 @@ before(async () => {
       function Harness(){const p=projects(s=>s.project); return <><label>Название проекта<input aria-label="Название проекта" value={p.projectName}
         onChange={e=>projects.getState().replaceProject({...projects.getState().project,projectName:e.target.value})}/></label>
         <output aria-label="Текущий проект">{p.projectId}</output><VariantSelector/>{initial.workspace && <ProjectWorkspacePage/>}</>}
-      createRoot(document.getElementById('root')).render(<ConfigProvider><RuntimeProvider><IdentityBoundary><Harness/></IdentityBoundary></RuntimeProvider></ConfigProvider>);
+      createRoot(document.getElementById('root')).render(<ConfigProvider><RuntimeProvider><ProjectBoundary><Harness/></ProjectBoundary></RuntimeProvider></ConfigProvider>);
     ` },
     bundle: true, write: false, format: "iife", platform: "browser", loader: { ".css": "empty" },
     define: { "process.env.NODE_ENV": '"production"' },
@@ -104,7 +104,7 @@ async function fixture(workspace = false, options: { unauthenticated?: boolean; 
   const boot=async()=>{
     await page.evaluate(data=>Object.assign(window,{fixture:data}),{project:server.get('P'),workspace,unauthenticated:options.unauthenticated});
     await page.addScriptTag({content:bundle});
-    if(!options.unauthenticated)await expect(page.getByRole('button',{name:'Выйти',exact:true})).toBeVisible();
+    await expect(page.getByRole('button',{name:'Выйти',exact:true})).toHaveCount(0);
   };
   await page.goto('https://fortis.test/workspace');await boot();
   return {page,server,requests,creates,errors,boot,fail:(status:number)=>{putStatus=status;},denyRead:(status:number)=>{getStatus=status;},hold:(pending:Promise<void>|null)=>{hold=pending;},auth:(pending:Promise<void>|null,id='user-A')=>{authHold=pending;userId=id;}};
@@ -146,18 +146,6 @@ test('enterprise switch while dirty offers Stay and Discard', {skip:!enabled}, a
     await f.page.getByRole('button',{name:'Enterprise F',exact:true}).click();
     await f.page.getByRole('button',{name:'Отказаться и продолжить',exact:true}).click();
     assert.deepEqual(await draftKeys(f.page),[]);
-  }finally{await f.page.close();}
-});
-test('logout while dirty offers Stay and Discard before ending session', {skip:!enabled}, async()=>{
-  const f=await fixture();try{
-    await edit(f.page);await f.page.getByRole('button',{name:'Выйти',exact:true}).click();
-    await expect(f.page.getByRole('dialog',{name:'Есть несохранённые изменения',exact:true})).toBeVisible();
-    assert.equal(f.requests.includes('POST /api/auth/logout'),false);
-    await f.page.getByRole('button',{name:'Остаться',exact:true}).click();
-    await expect(f.page.getByRole('textbox',{name:'Название проекта',exact:true})).toHaveValue('Unsaved edit');
-    await f.page.getByRole('button',{name:'Выйти',exact:true}).click();
-    await f.page.getByRole('button',{name:'Отказаться и выйти',exact:true}).click();
-    await f.page.waitForURL('**/login');assert.deepEqual(await draftKeys(f.page),[]);
   }finally{await f.page.close();}
 });
 test('failed or pending Save cannot navigate; explicit retry confirms before opening target', {skip:!enabled}, async()=>{
@@ -224,45 +212,6 @@ test('reload keeps saved state until explicit scoped recovery', {skip:!enabled},
   }finally{await f.page.close();}
 });
 
-test('session recheck hides all protected dialogs and preserves same-user transition state', {skip:!enabled}, async()=>{
-  const f=await fixture();let release!:()=>void;try{
-    await edit(f.page);await openVariants(f.page);await variantRow(f.page,'Project Q').getByRole('button',{name:'Загрузить',exact:true}).click();
-    f.auth(new Promise<void>(resolve=>{release=resolve;}));
-    await f.page.evaluate(()=>window.dispatchEvent(new Event('focus')));
-    await expect(f.page.getByText('Проверяем сессию…',{exact:true})).toBeVisible();
-    await expect(f.page.getByRole('dialog',{name:'Есть несохранённые изменения',exact:true})).toBeHidden();
-    await expect(f.page.getByRole('dialog',{name:'Варианты конфигурации',exact:true})).toBeHidden();
-    release();await expect(f.page.getByRole('button',{name:'Сохранить и открыть',exact:true})).toBeVisible();
-    await f.page.getByRole('button',{name:'Остаться',exact:true}).click();
-    f.auth(null,'user-B');await f.page.evaluate(()=>window.dispatchEvent(new Event('focus')));
-    await expect(f.page.getByRole('dialog',{name:'Варианты конфигурации',exact:true})).toBeHidden();
-    await expect(f.page.getByRole('textbox',{name:'Название проекта',exact:true})).not.toHaveValue('Unsaved edit');
-  }finally{release?.();await f.page.close();}
-});
-
-test('logout Save stays on failed save, then leaves only after confirmed retry', {skip:!enabled}, async()=>{
-  const f=await fixture();try{
-    await edit(f.page);await f.page.getByRole('button',{name:'Выйти',exact:true}).click();f.fail(503);
-    await f.page.getByRole('button',{name:'Сохранить и выйти',exact:true}).click();
-    await expect(f.page.getByRole('alert').filter({hasText:'Сохранение не подтверждено'})).toBeVisible();
-    assert.equal(f.requests.includes('POST /api/auth/logout'),false);
-    f.fail(200);await f.page.getByRole('button',{name:'Сохранить и выйти',exact:true}).click();
-    await f.page.waitForURL('**/login');assert.equal(f.server.get('P')?.version,8);assert.equal(f.server.get('P')?.projectName,'Unsaved edit');
-  }finally{await f.page.close();}
-});
-
-test('switching identity clears the previous user logout intent and name', {skip:!enabled}, async()=>{
-  const f=await fixture();try{
-    await edit(f.page,'Private A project');await f.page.getByRole('button',{name:'Выйти',exact:true}).click();
-    await expect(f.page.getByRole('dialog',{name:'Есть несохранённые изменения',exact:true})).toBeVisible();
-    f.auth(null,'user-B');await f.page.evaluate(()=>window.dispatchEvent(new Event('focus')));
-    await expect(f.page.getByRole('textbox',{name:'Название проекта',exact:true})).not.toHaveValue('Private A project');
-    await expect(f.page.getByRole('dialog',{name:'Есть несохранённые изменения',exact:true})).toBeHidden();
-    await expect(f.page.getByRole('textbox',{name:'Имя нового варианта перед выходом',exact:true})).toHaveCount(0);
-    assert.equal(f.requests.includes('POST /api/auth/logout'),false);
-  }finally{await f.page.close();}
-});
-
 test('enterprise Save keeps selection after failure and switches after confirmed retry', {skip:!enabled}, async()=>{
   const f=await fixture(true);try{
     await edit(f.page);await f.page.getByRole('button',{name:'Enterprise F',exact:true}).click();f.fail(503);
@@ -278,24 +227,10 @@ test('enterprise Save keeps selection after failure and switches after confirmed
 });
 
 
-test('successful logout never rechecks a known invalid session', {skip:!enabled,timeout:15000}, async()=>{
-  const f=await fixture(false,{rejectAfterLogout:true});try{
-    await f.page.getByRole('button',{name:'Выйти',exact:true}).click();
-    await f.page.waitForURL('https://fortis.test/login');
-    assert.equal(f.requests.filter(r=>r==='POST /api/auth/logout').length,1);
-    const afterLogout=f.requests.slice(f.requests.indexOf('POST /api/auth/logout')+1);
-    assert.equal(afterLogout.includes('GET /api/auth/me'),false);
-    await expect(f.page.getByRole('textbox',{name:'Название проекта',exact:true})).toHaveCount(0);
-    await expect(f.page.getByRole('button',{name:'Выйти',exact:true})).toHaveCount(0);
-    assert.deepEqual(f.errors,[]);
-  }finally{await f.page.close();}
-});
-
-test('an initially unknown session still checks auth and redirects on its first 401', {skip:!enabled,timeout:15000}, async()=>{
-  const f=await fixture(false,{unauthenticated:true});try{
-    await f.page.waitForURL('https://fortis.test/login?next=%2Fworkspace');
-    assert.equal(f.requests.filter(r=>r==='GET /api/auth/me').length,1);
-    assert.equal(f.requests.includes('POST /api/auth/logout'),false);
-    await expect(f.page.getByRole('textbox',{name:'Название проекта',exact:true})).toHaveCount(0);
-  }finally{await f.page.close();}
-});
+ test('workspace shows content without authentication requests', {skip:!enabled}, async()=>{
+ const f=await fixture();try{await f.boot();await expect(f.page.getByLabel('Текущий проект')).toHaveText('P');
+ assert.equal(f.requests.some(r=>r.includes('/api/auth/')),false);
+ await f.page.evaluate(()=>window.dispatchEvent(new Event('focus')));
+ assert.equal(f.requests.some(r=>r.includes('/api/auth/')),false);
+ }finally{await f.page.close();}
+ });

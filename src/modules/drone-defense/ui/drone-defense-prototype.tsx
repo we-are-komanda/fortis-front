@@ -3,10 +3,12 @@
 import { formatMinorRub } from "@/shared/lib/cost-projection";
 
 import { useProjectCost } from "@/modules/defense-calculator/domain/use-project-cost";
-import { ProjectBudgetPanel } from "@/modules/defense-calculator/ui/project-budget-panel";
 import { useRuntimeMode } from "@/shared/ui/runtime-provider";
 import { shouldLoadBackendProject, useDefenseVariantsStore } from "@/modules/drone-defense/domain/use-defense-variants-store";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
+import { canOpenCapability } from "@/shared/config/product-capabilities";
+import { CapabilityNotice } from "@/shared/ui/release-capability";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AppstoreOutlined,
@@ -27,13 +29,11 @@ import { Dropdown, Modal } from "antd";
 import { useDefenseStudioStore, studioPreviewData } from "@/modules/drone-defense/domain/use-defense-studio-store";
 import { buildEchelonMapModel } from "@/modules/drone-defense/domain/echelon-map-model";
 import { placedObjectsToMapPlacements } from "@/modules/drone-defense/domain/project-map-adapter";
-import { AssetLibraryManager } from "@/modules/drone-defense/ui/asset-library-manager";
 import { CoordinatePlacementPanel, type CoordinatePlacementInput } from "@/modules/drone-defense/ui/coordinate-placement-panel";
 import { DefenseToolsPanel } from "@/modules/drone-defense/ui/defense-tools-panel";
 import { GisBoard } from "@/modules/drone-defense/ui/gis-board";
 import { EchelonObjectsList } from "@/modules/drone-defense/ui/echelon-objects-list";
 import { MogCompositionEditor } from "@/modules/drone-defense/ui/mog-composition-editor";
-import { FacilityDrilldown } from "@/modules/drone-defense/ui/facility-drilldown";
 import { VariantStatusButton } from "@/modules/drone-defense/ui/variant-selector";
 import styles from "./drone-defense-prototype.module.css";
 import {
@@ -137,8 +137,42 @@ function layerWizardStoreDraft(draft: LayerWizardDraft) {
   };
 }
 
+const ScenarioWorkspace = dynamic(() => import("./scenario/scenario-workspace"), {
+  loading: () => <p role="status">Загрузка учебной площадки…</p>,
+});
+const FacilityDrilldown = dynamic(() => import("./facility-drilldown").then(module => module.FacilityDrilldown), {
+  loading: () => <p role="status">Загрузка 3D-вида…</p>,
+});
+const FactoryBimViewer = dynamic(() => import("./factory-bim-viewer").then(module => module.FactoryBimViewer), {
+  ssr: false, loading: () => <p role="status">Загрузка Factory BIM…</p>,
+});
+
 export function DroneDefensePrototype() {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const runtimeMode = useRuntimeMode();
+  const scenario = searchParams.get("view") === "scenario-modeling";
+  const factory = searchParams.get("view") === "3d";
+  const mapVisible = !scenario && !factory;
+  const [mapVisited, setMapVisited] = useState(mapVisible);
+  const [mapQuery, setMapQuery] = useState(mapVisible ? searchParams.toString() : "");
+  const returnParams = new URLSearchParams(searchParams.toString());
+  returnParams.set("view", "gis");
+  if (mapVisible) {
+    if (!mapVisited) setMapVisited(true);
+    if (mapQuery !== searchParams.toString()) setMapQuery(searchParams.toString());
+  }
+  // Keep the existing GIS instance and its camera/selection; direct scenario entry never initializes a project.
+  return <>
+    {mapVisited && <div hidden={!mapVisible} className="h-full min-h-0"><ProjectPrototype query={mapQuery} /></div>}
+    {factory && <FactoryBimViewer returnHref={`/prototype?${returnParams.toString()}`}/>}
+    {scenario && (runtimeMode === null ? <p role="status">Проверка режима…</p> :
+      canOpenCapability("scenarios", runtimeMode) ? <ScenarioWorkspace onExit={() => router.push(`/prototype?${mapQuery || "view=gis"}`, { scroll: false })} /> : <CapabilityNotice capability="scenarios" />)}
+  </>;
+}
+
+function ProjectPrototype({ query }: { query: string }) {
+  const searchParams = new URLSearchParams(query);
   const runtimeMode = useRuntimeMode();
   const backendProjectId = searchParams.get("projectId") ?? searchParams.get("project");
   const loadVariant = useDefenseVariantsStore((state) => state.loadVariant);
@@ -148,6 +182,8 @@ export function DroneDefensePrototype() {
   const [selectedSlotId, setSelectedSlotId] = useState<string | null>(null);
   const [catalogQuery, setCatalogQuery] = useState("");
   const [isCatalogTrayOpen, setIsCatalogTrayOpen] = useState(true);
+  const catalogCloseRef = useRef<HTMLButtonElement>(null);
+  const catalogOpenRef = useRef<HTMLButtonElement>(null);
   const [activeToolId, setActiveToolId] = useState<string | null>(null);
   const [isLayerPanelExpanded, setIsLayerPanelExpanded] = useState(true);
   const [showAllEchelonObjects, setShowAllEchelonObjects] = useState(false);
@@ -203,11 +239,9 @@ export function DroneDefensePrototype() {
     assetLibraryLoading,
     assetLibraryError,
     refreshAssetLibrary,
-    assetLibraryPreview, applyAssetLibraryPreview, discardAssetLibraryPreview,
+    assetLibraryPreview, applyAssetLibraryPreview,
     protectedObjects,
     refreshProtectedObjects,
-    upsertAssetInLibrary,
-    removeAssetFromLibrary,
   } = useDefenseProjectStore();
 
   useEffect(() => {
@@ -275,8 +309,10 @@ export function DroneDefensePrototype() {
   );
   const financial = useProjectCost(project,syncStatus,runtimeMode);
   const layerSummaries = useMemo(() => calculateLayerSummaries(project, financial.cost ?? null), [project,financial.cost]);
-  const requestedView = searchParams.get("view");
-  const activeView = requestedView === "scenario-modeling" || requestedView === "3d" ? "drilldown" : view;
+  const activeView = view;
+  useEffect(() => {
+    if (assetLibraryPreview?.baseProject === project) applyAssetLibraryPreview();
+  }, [assetLibraryPreview, project, applyAssetLibraryPreview]);
   const assetCatalogItems = useMemo(
     () => getAssetCatalogItems(project, selectedLayer?.code, project.placedObjects),
     [project, selectedLayer?.code],
@@ -851,25 +887,37 @@ export function DroneDefensePrototype() {
     <div className="flex h-full min-h-0 flex-col">
       {(variantError || protectedObjectsError) && <div role="alert">{variantError ?? protectedObjectsError}</div>}
       {syncStatus === "unverified" && <div role="status">Локальный черновик — серверное состояние не подтверждено.</div>}
-      {financial.error ? <div role="alert" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm">{financial.error} {financial.saved && <button type="button" className="min-h-11 px-3 underline" onClick={financial.retry}>Повторить расчёт</button>}</div> : <div role="status" className="border-b border-slate-200 bg-white px-4 py-1 text-xs">{financial.blocked ? "Смета ожидает проверки доступа" : !financial.cost ? "Смета загружается" : financial.saved ? `Смета сохранённой версии ${project.version}` : "Черновая смета — изменения не сохранены"}</div>}
-      {runtimeMode === "workspace" && !financial.blocked && <details className="max-h-72 shrink-0 overflow-y-auto border-b border-slate-200 bg-white"><summary className="min-h-11 cursor-pointer px-4 py-3 text-sm font-semibold">Бюджет и расходы</summary><ProjectBudgetPanel compact /></details>}
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       {activeView === "gis" ? (
         <section
+          id="fortis-gis-library-panel"
           data-sidebar-state={isCatalogTrayOpen ? "open" : "closed"}
           className={styles.prototypeSidebar}
           aria-hidden={!isCatalogTrayOpen}
+          inert={!isCatalogTrayOpen}
         >
           <div className={styles.prototypeSidebarHeader}>
             <div className={styles.prototypeBrandRow}>
               <div className={styles.prototypeBrandIcon}>
                 <AppstoreOutlined />
               </div>
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <h1 className={`${styles.prototypeTitleLarge} truncate`}>Моя карта</h1>
                 <p className={`${styles.prototypeMeta} truncate`}>Defense Configuration Studio</p>
               </div>
+              <button
+                ref={catalogCloseRef}
+                type="button"
+                className={`${styles.prototypeIconButton} ${styles.prototypeSidebarClose}`}
+                onClick={() => { setIsCatalogTrayOpen(false); requestAnimationFrame(() => catalogOpenRef.current?.focus()); }}
+                title="Свернуть боковую панель"
+                aria-label="Свернуть боковую панель"
+                aria-expanded={isCatalogTrayOpen}
+                aria-controls="fortis-gis-library-panel"
+              >
+                <LeftOutlined />
+              </button>
             </div>
             <div className="mt-3 hidden lg:block">
               <VariantStatusButton fullWidth />
@@ -882,20 +930,12 @@ export function DroneDefensePrototype() {
                 <div className="min-w-0">
                   <p className={styles.prototypeEyebrow}>Библиотека СЗ</p>
                   <h2 className={`${styles.prototypeTitle} truncate`}>
-                    {selectedLayer?.code ?? "—"} · {selectedLayer?.name ?? "Эшелон не выбран"}
+                    Все средства защиты
                   </h2>
                   <p className={styles.prototypeMeta}>
-                    {formatLayerRange(selectedRadii.innerRadiusM, selectedRadii.outerRadiusM)}
+                    Полная библиотека · все эшелоны
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className={`${styles.prototypeButton} shrink-0 cursor-pointer px-2`}
-                  onClick={() => setIsCatalogTrayOpen(false)}
-                  title="Свернуть библиотеку в угол карты"
-                >
-                  Свернуть
-                </button>
               </div>
               <input
                 className={`${styles.prototypeField} mt-3`}
@@ -904,33 +944,11 @@ export function DroneDefensePrototype() {
                 placeholder="Найти средство..."
               />
             </div>
-            <AssetLibraryManager
-              assets={project.assetLibrary}
-              enterpriseId={project.enterpriseId}
-              previewAssets={assetLibraryPreview?.baseProject === project ? assetLibraryPreview.assets : null}
-              onApplyPreview={applyAssetLibraryPreview}
-              onDiscardPreview={discardAssetLibraryPreview}
-              placedObjects={project.placedObjects}
-              selectedAssetId={activeToolId ?? selectedPlacedObject?.assetId}
-              loading={assetLibraryLoading}
-              error={assetLibraryError}
-              onRefresh={() => refreshAssetLibrary({ isPublic: true, limit: 100 })}
-              onSelectAsset={(assetId) => {
-                setActiveToolId(assetId);
-                selectAsset(assetId);
-              }}
-              onAssetSaved={(asset) => {
-                upsertAssetInLibrary(asset);
-              }}
-              onAssetDeleted={(assetId) => {
-                const result = removeAssetFromLibrary(assetId);
-                if (result.ok) {
-                  setActiveToolId((current) => (current === assetId ? null : current));
-                }
-                return result;
-              }}
-              onMessage={setLastPlacementMessage}
-            />
+            {assetLibraryLoading && <p role="status" className="px-3 py-2 text-sm">Загрузка библиотеки…</p>}
+            {assetLibraryError && <div role="alert" className="px-3 py-2 text-sm">
+              <p>{assetLibraryError}</p>
+              <button type="button" className="min-h-11 text-blue-600" onClick={() => void refreshAssetLibrary({ isPublic: true, limit: 100 })}>Повторить</button>
+            </div>}
             <div className={styles.prototypeScrollArea}>
               <DefenseToolsPanel
                 assets={filteredCatalogItems}
@@ -1369,12 +1387,15 @@ export function DroneDefensePrototype() {
             ) : null}
 
             <button
+              ref={catalogOpenRef}
               type="button"
               data-sidebar-toggle-state={isCatalogTrayOpen ? "hidden" : "visible"}
               className={`${styles.prototypeToggleLauncher} ${styles.prototypeButtonPrimary} cursor-pointer transition duration-300 ease-in-out`}
-              onClick={() => setIsCatalogTrayOpen(true)}
-              title="Открыть библиотеку средств защиты"
-              aria-label="Открыть библиотеку средств защиты"
+              onClick={() => { setIsCatalogTrayOpen(true); requestAnimationFrame(() => catalogCloseRef.current?.focus()); }}
+              title="Развернуть боковую панель"
+              aria-label="Развернуть боковую панель"
+              aria-expanded={isCatalogTrayOpen}
+              aria-controls="fortis-gis-library-panel"
               aria-hidden={isCatalogTrayOpen}
               tabIndex={isCatalogTrayOpen ? -1 : 0}
             >

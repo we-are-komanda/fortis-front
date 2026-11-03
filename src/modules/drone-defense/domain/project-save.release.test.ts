@@ -6,7 +6,7 @@ import { draftStorageKey, type ProjectDraft } from "@/shared/lib/project-draft-s
 import { setAuthenticatedIdentity, useSessionStore } from "@/shared/lib/session-state";
 import { useDefenseProjectStore as projects } from "@/shared/lib/use-defense-project-store";
 import { shouldLoadBackendProject, useDefenseVariantsStore as variants } from "./use-defense-variants-store";
-import { saveBeforeLogout } from "@/shared/lib/identity";
+import { saveCurrentProject } from "@/shared/lib/identity";
 
 const originalFetch = globalThis.fetch;
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
@@ -225,7 +225,7 @@ test("409 preserves the local draft and a new variant never writes the conflicte
   assert.equal(projects.getState().syncStatus, "saved");
 });
 
-for (const status of [401, 403, 404]) test(`${status} after a real dirty save does not retry or verify and blocks further writes`, async () => {
+for (const status of [401, 403, 404]) test(`${status} after a dirty save preserves the draft without automatic retry`, async () => {
   setAuthenticatedIdentity("A");
   const baseline = savedFixture();
   projects.setState({ identityId: "A" });
@@ -240,8 +240,8 @@ for (const status of [401, 403, 404]) test(`${status} after a real dirty save do
   assert.deepEqual(methods, ["PUT"]);
   assert.notEqual(projects.getState().syncStatus, "saved");
   if (status === 401) {
-    assert.equal(useSessionStore.getState().userId, null);
-    assert.notEqual(projects.getState().project.projectId, sent.projectId);
+    assert.equal(useSessionStore.getState().userId, "A");
+    assert.deepEqual(projects.getState().project, sent);
   } else {
     assert.deepEqual(projects.getState().project, sent);
     assert.ok(projects.getState().accessError);
@@ -373,9 +373,9 @@ test("a confirmed save permits leaving even when the subsequent project list ref
     if (init?.method === "PUT") { writes++; return Response.json({ projectId: "P", enterpriseId: "E", version: 8, name: "P" }); }
     return new Response(null, { status: 503 });
   };
-  assert.equal(await saveBeforeLogout("P"), true);
+  assert.equal(await saveCurrentProject("P"), true);
   assert.equal(projects.getState().project.version, 8);
-  assert.equal(await saveBeforeLogout("P"), true);
+  assert.equal(await saveCurrentProject("P"), true);
   assert.equal(writes, 1);
 });
 

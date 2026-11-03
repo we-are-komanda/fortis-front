@@ -13,11 +13,6 @@ export function boundaryError(status: number, code: string, message: string, id 
   });
 }
 
-export function accessTokenFromRequest(request: Request): string | null {
-  const match = request.headers.get("cookie")?.match(/(?:^|;\s*)access-token=([^;]+)/);
-  try { return match ? decodeURIComponent(match[1]) : null; } catch { return null; }
-}
-
 const responseHeaders = ["content-type", "content-disposition", "content-range", "accept-ranges", "etag", "last-modified", "retry-after", "www-authenticate", "x-correlation-id"];
 
 // Transparent HTTP boundary. JSON adapters below opt in to parsing explicitly.
@@ -36,7 +31,7 @@ export async function forwardBackendRequest(path: string, init: RequestInit = {}
     return boundaryError(503, "configuration_error", "Backend configuration is unavailable", id);
   }
   const headers = new Headers();
-  for (const name of ["accept", "content-type", "range", "if-range", "if-none-match", "if-modified-since", "authorization", "idempotency-key"]) {
+  for (const name of ["accept", "content-type", "range", "if-range", "if-none-match", "if-modified-since", "idempotency-key"]) {
     const value = new Headers(init.headers).get(name) ?? options.request?.headers.get(name);
     if (value) headers.set(name, value);
   }
@@ -44,11 +39,6 @@ export async function forwardBackendRequest(path: string, init: RequestInit = {}
   for (const name of ["origin", "x-forwarded-for"]) {
     const value = new Headers(init.headers).get(name);
     if (value) headers.set(name, value);
-  }
-  const token = options.request && accessTokenFromRequest(options.request);
-  if (token) {
-    if (!headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
-    headers.set("cookie", `access-token=${encodeURIComponent(token)}`);
   }
   headers.set("x-request-id", id);
   const deadline = AbortSignal.timeout(timeout);

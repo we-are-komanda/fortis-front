@@ -1,0 +1,35 @@
+{
+  "id": "M03-heat-exchanger",
+  "estimated_credits": 30,
+  "request": {
+    "ai_model": "meshy-7.1",
+    "model_type": "standard",
+    "geometry_resolution": "standard",
+    "should_texture": true,
+    "texture_resolution": "2k",
+    "enable_pbr": true,
+    "target_formats": [
+      "glb"
+    ],
+    "should_remesh": false,
+    "auto_size": false,
+    "image_enhancement": false,
+    "multi_view_thumbnails": true,
+    "response_format": "json",
+    "file_path": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/references/M03-heat-exchanger.png"
+  },
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": "{\n  \"task_id\": \"01a159b5-aff3-744c-87cd-24ef0281ae87\",\n  \"status\": \"PENDING\",\n  \"message\": \"3D generation task created successfully. Task ID: 01a159b5-aff3-744c-87cd-24ef0281ae87\",\n  \"estimated_time\": \"2-3 minutes\"\n}"
+      }
+    ],
+    "structuredContent": {
+      "task_id": "01a159b5-aff3-744c-87cd-24ef0281ae87",
+      "status": "PENDING",
+      "message": "3D generation task created successfully. Task ID: 01a159b5-aff3-744c-87cd-24ef0281ae87",
+      "estimated_time": "2-3 minutes"
+    }
+  }
+}

@@ -48,12 +48,19 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
   const isPrototype = normalizedPathname === "/prototype";
   const isCalculator = normalizedPathname === "/calculator";
   const isRetrospective = normalizedPathname === "/retrospective-analysis";
+  const projectId = searchParams.get("projectId") ?? searchParams.get("project") ?? activeVariantId;
+  const mapHref = projectId ? `/prototype?projectId=${encodeURIComponent(projectId)}` : "/prototype?view=gis";
+  const modelingParams = new URLSearchParams(searchParams.toString());
+  modelingParams.set("view", "scenario-modeling");
+  if (projectId) modelingParams.set("projectId", projectId);
+  const modelingHref = `/prototype?${modelingParams.toString()}`;
   const requestedView = searchParams.get("view");
-  const is3DQueryActive = isPrototype && (requestedView === "scenario-modeling" || requestedView === "3d");
-  const isDrilldownActive = isPrototype && (is3DQueryActive || view === "drilldown");
-  const isMapActive = isPrototype && !isDrilldownActive;
-  const mobileTitle = isCalculator ? "Калькулятор" : isDrilldownActive ? "Сценарии" : isRetrospective ? "Анализ" : "Моя карта";
-  const mobileSubtitle = isCalculator
+  const isScenarioActive = isPrototype && requestedView === "scenario-modeling";
+  const isFactoryActive = isPrototype && requestedView === "3d";
+  const isDrilldownActive = isPrototype && !isFactoryActive && (isScenarioActive || view === "drilldown");
+  const isMapActive = isPrototype && !isFactoryActive && !isDrilldownActive;
+  const mobileTitle = isFactoryActive ? "Factory BIM" : isCalculator ? "Калькулятор" : isDrilldownActive ? "Моделирование" : isRetrospective ? "Анализ" : "Моя карта";
+  const mobileSubtitle = isFactoryActive ? "Промышленный комплекс" : isCalculator
     ? "Defense Cost Estimator"
     : isDrilldownActive
       ? scenarioModelingTitle
@@ -81,7 +88,7 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
           </div>
           <nav className="flex flex-1 flex-col gap-2 px-2 py-4">
             <Link
-              href="/prototype"
+              href={mapHref}
               className={`${railItemClassName} ${isMapActive ? activeRailClassName : idleRailClassName}`}
               onClick={() => setView("gis")}
               title="Карта"
@@ -91,6 +98,17 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
               </span>
               <span>Карта</span>
             </Link>
+            {canOpenCapability("scenarios", runtimeMode) && (<Link
+              href={modelingHref}
+              scroll={false}
+              className={`${railItemClassName} ${isScenarioActive ? activeRailClassName : idleRailClassName}`}
+              aria-label="Моделирование"
+              aria-current={isScenarioActive ? "page" : undefined}
+              title="Моделирование"
+            >
+              <span className="text-lg"><RadarChartOutlined /></span>
+              <span className="w-full text-center leading-tight">Модели&shy;рование</span>
+            </Link>)}
             {canOpenCapability("calculation", runtimeMode) && (<Link
               href="/calculator"
               className={`${railItemClassName} ${isCalculator ? activeRailClassName : idleRailClassName}`}
@@ -100,17 +118,6 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
                 <CalculatorOutlined />
               </span>
               <span>Расчёт</span>
-            </Link>)}
-            {canOpenCapability("scenarios", runtimeMode) && (<Link
-              href="/prototype?view=scenario-modeling"
-              className={`${railItemClassName} ${isDrilldownActive ? activeRailClassName : idleRailClassName}`}
-              onClick={() => setView("drilldown")}
-              title={scenarioModelingTitle}
-            >
-              <span className="text-lg">
-                <RadarChartOutlined />
-              </span>
-              <span>Сценарии</span>
             </Link>)}
             {canOpenCapability("retrospective", runtimeMode) && (<Link
               href="/retrospective-analysis"
@@ -124,10 +131,10 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
             </Link>)}
           </nav>
           <div className="space-y-2 border-t border-slate-100 px-2 py-3">
-            <VariantSaveButton
+            {!isScenarioActive && !isFactoryActive && <VariantSaveButton
               iconOnly
               className="flex h-12 w-full items-center justify-center rounded-xl text-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-wait disabled:opacity-60"
-            />
+            />}
           </div>
         </aside>
 
@@ -149,34 +156,35 @@ export function DefenseStudioShell({ children }: DefenseStudioShellProps) {
                 <p className="truncate text-xs text-slate-500">{mobileSubtitle}</p>
               </div>
               <div className="ml-auto">
-                <VariantSaveButton />
+                {!isScenarioActive && !isFactoryActive && <VariantSaveButton />}
               </div>
             </div>
             <div className="mt-2">
-              <VariantStatusButton fullWidth />
+              {!isScenarioActive && !isFactoryActive && <VariantStatusButton fullWidth />}
             </div>
 
             <nav className="mt-2 grid auto-cols-fr grid-flow-col gap-1 rounded-xl bg-slate-100 p-1">
               <Link
-                href="/prototype"
+                href={mapHref}
                 className={`${mobileItemClassName} ${isMapActive ? activeMobileClassName : idleMobileClassName}`}
                 onClick={() => setView("gis")}
               >
                 Карта
               </Link>
+              {canOpenCapability("scenarios", runtimeMode) && (<Link
+                href={modelingHref}
+                scroll={false}
+                className={`${mobileItemClassName} min-w-0 text-center ${isScenarioActive ? activeMobileClassName : idleMobileClassName}`}
+                aria-label="Моделирование"
+                aria-current={isScenarioActive ? "page" : undefined}
+              >
+                <span>Модели&shy;рование</span>
+              </Link>)}
               {canOpenCapability("calculation", runtimeMode) && (<Link
                 href="/calculator"
                 className={`${mobileItemClassName} ${isCalculator ? activeMobileClassName : idleMobileClassName}`}
               >
                 Расчёт
-              </Link>)}
-              {canOpenCapability("scenarios", runtimeMode) && (<Link
-                href="/prototype?view=scenario-modeling"
-                className={`${mobileItemClassName} ${isDrilldownActive ? activeMobileClassName : idleMobileClassName}`}
-                onClick={() => setView("drilldown")}
-                title={scenarioModelingTitle}
-              >
-                Сценарии
               </Link>)}
               {canOpenCapability("retrospective", runtimeMode) && (<Link
                 href="/retrospective-analysis"

@@ -10,12 +10,12 @@ export const productCapabilities = {
   report: { status: "not_released", title: "Отчёт для согласования", description: "Проверка состава и выгрузки отчёта ещё не завершена." },
   operational: { status: "demo", title: "Оперативная платформа", href: "/dashboard", description: "Синтетические экраны мониторинга и управления." },
   retrospective: { status: "demo", title: "Ретроспективный анализ", href: "/retrospective-analysis", description: "Демонстрационный модуль вне рабочего релиза." },
-  scenarios: { status: "demo", title: "Сценарное моделирование", href: "/prototype?view=scenario-modeling", description: "Демонстрационный модуль вне рабочего релиза." },
+  scenarios: { status: "available", title: "Сценарное моделирование", href: "/prototype?view=scenario-modeling", description: "Учебная карта условного предприятия: подготовка, просмотр и сравнение записей." },
 } as const satisfies Record<string, { status: CapabilityStatus; title: string; description: string; href?: string }>;
 
 export type ProductCapability = keyof typeof productCapabilities;
 
-// Presentation only. Resource authorization remains the responsibility of the API.
+// Presentation capabilities remain separate from shared workspace data access.
 export function canOpenCapability(capability: ProductCapability, mode: "workspace" | "demo" | null) {
   const status: CapabilityStatus = productCapabilities[capability].status;
   return status === "available" || (status === "demo" && mode === "demo");

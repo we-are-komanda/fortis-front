@@ -11,6 +11,8 @@ test("capability policy does not promote demo or unaccepted functionality into w
     assert.equal(canOpenCapability(capability, "workspace"), status === "available", capability);
     assert.equal(canOpenCapability(capability, "demo"), status !== "not_released", capability);
   }
+  assert.equal(productCapabilities.scenarios.status, "available");
+  assert.equal(canOpenCapability("scenarios", "workspace"), true);
   assert.equal(productCapabilities.compare.status, "available");
   assert.equal(productCapabilities.compare.href, "/workspace#configuration-comparison");
   assert.equal(productCapabilities.report.status, "not_released");
@@ -49,7 +51,7 @@ test("direct operational pages and layout render notices without executing mock 
     const layout = await import("@/app/(dashboard)/layout");
     assert.doesNotMatch(renderToStaticMarkup(await layout.default({ children: <p>Private-looking synthetic metric 987</p> })), /987/);
     const prototype = await import("@/app/(defense-studio)/prototype/page");
-    for (const view of ["scenario-modeling", "3d", ["3d", "gis"]]) {
+    for (const view of ["3d", ["3d", "gis"]]) {
       assert.match(renderToStaticMarkup(await prototype.default({ searchParams: Promise.resolve({ view }) })), /Раздел не включён/);
     }
   } finally {

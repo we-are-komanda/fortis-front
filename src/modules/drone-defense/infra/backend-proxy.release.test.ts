@@ -40,11 +40,11 @@ function request(path = "/api/defense/projects") {
   return new Request(`http://frontend.test${path}`, { headers: { cookie: "access-token=synthetic" } });
 }
 test("BFF preserves upstream error status and body, including HTML and empty bodies", async () => {
-  const { GET } = await import("@/app/api/auth/me/route");
+  const { GET } = await import("@/app/api/v1/[...path]/route");
   for (const code of [401, 403, 404, 409, 500]) {
     for (const payload of ['{"errors":"synthetic"}', "<html>error</html>", ""]) {
       status = code; body = payload;
-      const res = await GET(request());
+      const res = await GET(request("/api/v1/projects"));
       assert.equal(res.status, code);
       assert.equal(await res.text(), payload);
       assert.equal(res.headers.get("x-request-id"), "upstream-test");
@@ -56,13 +56,13 @@ test("projects rejects an empty successful body instead of returning 200 null", 
   const { GET } = await import("@/app/api/defense/projects/route");
   assert.equal((await GET(request())).status, 502);
 });
-test("BFF and API v1 share target, query and auth; legitimate empty stays empty", async () => {
+test("BFF and API v1 share target and query without credentials; legitimate empty stays empty", async () => {
   status = 200; body = '{"items":[],"totalItems":0}';
   const { GET: bff } = await import("@/app/api/defense/projects/route");
   const first = await bff(request("/api/defense/projects?limit=2&name=a%20b"));
   assert.deepEqual(await first.json(), { items: [], totalItems: 0 });
   assert.equal(lastRequest.url, "/api/v1/projects?limit=2&name=a%20b");
-  assert.equal(lastRequest.auth, "Bearer synthetic");
+  assert.equal(lastRequest.auth, "");
   const { GET } = await import("@/app/api/v1/[...path]/route");
   const res = await GET(request("/api/v1/enterprises/?limit=2"));
   assert.equal(lastRequest.url, "/api/v1/enterprises?limit=2");
@@ -81,9 +81,9 @@ test("binary documents preserve bytes/status/content type and mutation method/bo
   assert.equal(lastRequest.method, "POST"); assert.equal(lastRequest.body, "synthetic body");
 });
 test("missing configuration fails without network fallback; conflicts fail", async () => {
-  const { GET } = await import("@/app/api/auth/me/route");
+  const { GET } = await import("@/app/api/v1/[...path]/route");
   delete process.env.BACKEND_URL; delete process.env.FORTIS_LOCAL_DEVELOPMENT;
-  const res = await GET(request());
+  const res = await GET(request("/api/v1/projects"));
   assert.equal(res.status, 503);
   assert.ok((await res.json()).error.requestId);
   process.env.BACKEND_URL = base;
@@ -93,13 +93,13 @@ test("missing configuration fails without network fallback; conflicts fail", asy
   delete process.env.FORTIS_API_BASE_URL;
 });
 test("connection refused is 502; deadline is 504 with request id", async () => {
-  const { GET } = await import("@/app/api/auth/me/route");
+  const { GET } = await import("@/app/api/v1/[...path]/route");
   process.env.BACKEND_URL = "http://127.0.0.1:1";
-  const refused = await GET(request());
+  const refused = await GET(request("/api/v1/projects"));
   assert.equal(refused.status, 502); assert.ok((await refused.json()).error.requestId);
   process.env.BACKEND_URL = base; process.env.FORTIS_API_TIMEOUT_MS = "25";
   delay = 100; status = 200; body = '{}';
-  const res = await GET(request());
+  const res = await GET(request("/api/v1/projects"));
   assert.equal(res.status, 504); assert.ok((await res.json()).error.requestId);
   delay = 0; delete process.env.FORTIS_API_TIMEOUT_MS;
 });
@@ -108,7 +108,7 @@ test("workspace ignores query demo; demo route is explicit and marked", async ()
   process.env.FORTIS_RUNTIME_MODE = "workspace";
   assert.equal((await GET(request("/api/defense/facilities?demo=nak&visualDemo=true"))).status, 404);
   process.env.FORTIS_RUNTIME_MODE = "demo";
-  const demo = await GET(request());
+  const demo = await GET(request("/api/v1/projects"));
   assert.equal(demo.status, 200); assert.equal(demo.headers.get("x-fortis-runtime-mode"), "demo");
   assert.ok((await demo.json()).length > 0);
   process.env.FORTIS_RUNTIME_MODE = "workspace";

@@ -22,6 +22,9 @@ import {
 } from "@/modules/drone-defense/domain/echelon-map-model";
 import type { BuildAssetIcon } from "@/modules/drone-defense/domain/echelon-build-assets";
 import { MapObjectMarker } from "@/modules/drone-defense/ui/map-object-marker";
+import offlineMapStyle from "../../../../public/maps/demo-region/style.json";
+import type { StyleSpecification } from "maplibre-gl";
+import offlineMapRegions from "@/shared/config/offline-map-regions.json";
 import { withBasePath } from "@/shared/lib/base-path";
 import {
   getAvailableBaseMapSources,
@@ -224,20 +227,22 @@ export function GisBoard({
   onSelectPlacement,
   onDropAsset,
 }: GisBoardProps) {
+  const [failedOnlineSourceId, setFailedOnlineSourceId] = useState<string | null>(null);
   const availableBaseMapSources = useMemo(() => getAvailableBaseMapSources(), []);
   const defaultBaseMapSourceId = useMemo(
     () => resolveDefaultBaseMapSourceId(availableBaseMapSources),
     [availableBaseMapSources],
   );
   const currentBaseMapSource = useMemo<BaseMapSource>(() => {
-    const requested = availableBaseMapSources.find((source) => source.id === baseMapSourceId);
+    const requestedId = failedOnlineSourceId === baseMapSourceId ? "internal-basemap" : baseMapSourceId;
+    const requested = availableBaseMapSources.find((source) => source.id === requestedId);
     if (requested) return requested;
 
     const fallback = availableBaseMapSources.find((source) => source.id === defaultBaseMapSourceId);
     if (fallback) return fallback;
 
     return availableBaseMapSources[0]!;
-  }, [availableBaseMapSources, baseMapSourceId, defaultBaseMapSourceId]);
+  }, [availableBaseMapSources, baseMapSourceId, defaultBaseMapSourceId, failedOnlineSourceId]);
   const groupedBaseMapSources = useMemo(() => {
     const groups = new Map<BaseMapSourceCategory, BaseMapSource[]>();
     for (const source of availableBaseMapSources) {
@@ -268,12 +273,32 @@ export function GisBoard({
   const isAnimatingFocusRef = useRef(false);
   const skipNextLayerFocusRef = useRef(false);
   const lastErroredBaseMapSourceIdRef = useRef<string | null>(null);
+  const baseMapLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusTargetRef = useRef<{ facilityId: string | null; layerId: string | null }>({
     facilityId: selectedFacility?.id ?? null,
     layerId: selectedLayerId || null,
   });
   const deckRef = useRef<DeckGLRef>(null);
-  const baseMapStyle = useMemo(() => resolveMapStyle(currentBaseMapSource), [currentBaseMapSource]);
+  const localRegion = offlineMapRegions.reduce((nearest, region) =>
+    Math.hypot(region.center[0] - viewState.longitude, region.center[1] - viewState.latitude) <
+    Math.hypot(nearest.center[0] - viewState.longitude, nearest.center[1] - viewState.latitude) ? region : nearest,
+  );
+  const isBundledMap = currentBaseMapSource.url === "/maps/demo-region/style.json";
+  const baseMapStyle = useMemo(() => {
+    if (!isBundledMap || typeof window === "undefined") return resolveMapStyle(currentBaseMapSource);
+    const origin = window.location.origin;
+    // MapLibre requires absolute sprite URLs before transformRequest is called.
+    return {
+      ...offlineMapStyle,
+      sprite: origin + offlineMapStyle.sprite,
+      glyphs: origin + offlineMapStyle.glyphs,
+      sources: { openmaptiles: {
+        ...offlineMapStyle.sources.openmaptiles,
+        bounds: localRegion.bounds,
+        tiles: offlineMapStyle.sources.openmaptiles.tiles.map(url => origin + url),
+      } },
+    } as unknown as StyleSpecification;
+  }, [currentBaseMapSource, isBundledMap, localRegion]);
 
   const visibleFacilities = useMemo(() => (selectedFacility ? [selectedFacility] : []), [selectedFacility]);
   const layerCoverage = hexCoverageByLayer(layers);
@@ -395,9 +420,9 @@ export function GisBoard({
   }, [currentBaseMapSource.id]);
 
   useEffect(() => {
-    if (baseMapSourceId === currentBaseMapSource.id) return;
+    if (baseMapSourceId === currentBaseMapSource.id || failedOnlineSourceId === baseMapSourceId) return;
     onSelectBaseMapSource(currentBaseMapSource.id);
-  }, [baseMapSourceId, currentBaseMapSource.id, onSelectBaseMapSource]);
+  }, [baseMapSourceId, currentBaseMapSource.id, failedOnlineSourceId, onSelectBaseMapSource]);
 
   useEffect(() => {
     if (!isBaseMapMenuOpen) return;
@@ -989,6 +1014,7 @@ export function GisBoard({
     (sourceId: string) => {
       setIsBaseMapMenuOpen(false);
       setBaseMapWarning(null);
+      setFailedOnlineSourceId(null);
       lastErroredBaseMapSourceIdRef.current = null;
       onSelectBaseMapSource(sourceId);
     },
@@ -1000,6 +1026,17 @@ export function GisBoard({
       const errorMessage = extractErrorMessage(event);
       if (lastErroredBaseMapSourceIdRef.current === currentBaseMapSource.id) return;
       lastErroredBaseMapSourceIdRef.current = currentBaseMapSource.id;
+
+      if (currentBaseMapSource.isExternal && availableBaseMapSources.some(source => source.id === "internal-basemap")) {
+        setBaseMapWarning("Не удалось загрузить онлайн-карту. Включена локальная карта.");
+        setFailedOnlineSourceId(baseMapSourceId);
+        return;
+      }
+
+      if (!currentBaseMapSource.isExternal) {
+        setBaseMapWarning("Не удалось загрузить локальную карту. Проверьте целостность установки или выберите онлайн-карту.");
+        return;
+      }
 
       if (currentBaseMapSource.id === defaultBaseMapSourceId) {
         setBaseMapWarning(errorMessage ? `Источник карты недоступен: ${errorMessage}` : "Источник карты недоступен");
@@ -1013,8 +1050,14 @@ export function GisBoard({
       );
       onSelectBaseMapSource(defaultBaseMapSourceId);
     },
-    [currentBaseMapSource.id, currentBaseMapSource.title, defaultBaseMapSourceId, onSelectBaseMapSource],
+    [currentBaseMapSource.id, currentBaseMapSource.title, currentBaseMapSource.isExternal, defaultBaseMapSourceId, onSelectBaseMapSource, availableBaseMapSources, baseMapSourceId],
   );
+
+  useEffect(() => {
+    if (!currentBaseMapSource.isExternal) return;
+    baseMapLoadTimerRef.current = setTimeout(() => handleBaseMapError(new Error("timeout")), 15_000);
+    return () => { if (baseMapLoadTimerRef.current) clearTimeout(baseMapLoadTimerRef.current); };
+  }, [currentBaseMapSource.id, currentBaseMapSource.isExternal, handleBaseMapError]);
 
   return (
     <section
@@ -1051,7 +1094,8 @@ export function GisBoard({
           onPlaceActiveTool({ lng: info.coordinate[0], lat: info.coordinate[1] });
         }}
       >
-        <MaplibreMap attributionControl={false} mapStyle={baseMapStyle} onError={handleBaseMapError} />
+        <MaplibreMap attributionControl={false} mapStyle={baseMapStyle} onError={handleBaseMapError}
+          onIdle={() => { if (baseMapLoadTimerRef.current) clearTimeout(baseMapLoadTimerRef.current); }} />
       </DeckGL>
 
       <div className="pointer-events-none absolute inset-0 z-10">
@@ -1290,9 +1334,14 @@ export function GisBoard({
         />
       ) : null}
 
-      {baseMapWarning ? (
-        <div className="absolute left-1/2 top-20 z-10 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-xs font-medium text-amber-900 shadow-lg">
+      {baseMapWarning || isBundledMap ? (
+        <div role="alert" className="absolute left-1/2 top-20 z-10 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-xs font-medium text-amber-900 shadow-lg">
           {baseMapWarning}
+          {isBundledMap && <div>Локально сохранены районы 20×20 км вокруг «Завода Альфа» и «Тестового предприятия». За их пределами подложка недоступна.</div>}
+          <div className="mt-2 flex flex-wrap gap-x-4">
+            {failedOnlineSourceId && <button className="min-h-11 underline" onClick={() => handleBaseMapSelect(failedOnlineSourceId)}>Повторить загрузку онлайн-карты</button>}
+            {isBundledMap && <button className="min-h-11 underline" onClick={() => setInteractiveViewState({ ...viewStateRef.current, longitude: localRegion.center[0], latitude: localRegion.center[1], zoom: 12 })}>К локальному району</button>}
+          </div>
         </div>
       ) : null}
 

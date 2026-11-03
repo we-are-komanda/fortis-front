@@ -217,7 +217,7 @@ function applyProject(project: DefenseProject, set: (state: Partial<DefenseProje
 export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => {
   const initialProject = createWorkspaceDefenseProject();
   return {
-    identityId: null,
+    identityId: "shared-workspace",
     accessError: null,
     project: initialProject,
     hydrated: false,

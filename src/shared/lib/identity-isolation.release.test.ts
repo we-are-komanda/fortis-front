@@ -62,7 +62,7 @@ test("account switch resets all stores and drops an in-flight A list", async () 
  } finally { globalThis.fetch = original; }
 });
 
-test("401 invalidates identity; 403/404 block saving without retries or false saved state", async () => {
+test("401 preserves the draft; 403/404 block saving without retries or false saved state", async () => {
  const original = globalThis.fetch;
  try {
   for (const status of [403, 404, 401]) {
@@ -75,8 +75,8 @@ test("401 invalidates identity; 403/404 block saving without retries or false sa
    await variants.getState().overwriteActiveVariant();
    assert.notEqual(projects.getState().syncStatus, "saved");
    if (status === 401) {
-    assert.equal(useSessionStore.getState().userId, null);
-    assert.notEqual(projects.getState().project.projectId, "private-A");
+    assert.equal(useSessionStore.getState().userId, "A");
+    assert.equal(projects.getState().project, project);
    } else {
     assert.equal(projects.getState().project, project);
     assert.ok(projects.getState().accessError);
@@ -87,21 +87,7 @@ test("401 invalidates identity; 403/404 block saving without retries or false sa
  } finally { globalThis.fetch = original; }
 });
 
-import { logout } from "./identity";
 
-test("late logout completion cannot clear the next authenticated identity", async () => {
- const original = globalThis.fetch;
- try {
-  setAuthenticatedIdentity("logout-A");
-  let finish!: (response: Response) => void;
-  globalThis.fetch = () => new Promise<Response>(resolve => { finish = resolve; });
-  const pending = logout();
-  setAuthenticatedIdentity("logout-B");
-  finish(Response.json({ status: "ok" }));
-  await assert.rejects(pending, /Сессия изменилась/);
-  assert.equal(useSessionStore.getState().userId, "logout-B");
- } finally { globalThis.fetch = original; }
-});
 
 test("late project access failures cannot invalidate another current project", async (t) => {
  const original = globalThis.fetch;
@@ -126,55 +112,4 @@ test("late project access failures cannot invalidate another current project", a
    });
   }
  } finally { globalThis.fetch = original; }
-});
-
-test("logout preserves scoped recovery only for its owner after fresh access and explicit restoration", async () => {
- const original = globalThis.fetch; const storage = globalThis.localStorage;
- const data = new Map<string,string>();
- Object.defineProperty(globalThis,"localStorage",{configurable:true,value:{getItem:(key:string)=>data.get(key)??null,setItem:(key:string,value:string)=>data.set(key,value)}});
- try {
-  setAuthenticatedIdentity("A");
-  projects.getState().setLocalDraftsEnabled(true);
-  const server = { ...createWorkspaceDefenseProject(), projectId: "private-A", enterpriseId: "E", version: 7, source: "backend" as const, projectName: "Saved A" };
-  projects.getState().acceptServerProject(server);
-  projects.getState().replaceProject({ ...server, projectName: "Unsaved A" });
-  const key = draftStorageKey({ userId: "A", enterpriseId: "E", projectId: "private-A" });
-  const raw = data.get(key);
-  assert.ok(raw);
-  globalThis.fetch = async (url, init) => { assert.equal(url,"/api/auth/logout"); assert.equal(init?.method,"POST"); return Response.json({status:"ok"}); };
-  await logout();
-  assert.equal(useSessionStore.getState().userId,null);
-  assert.notEqual(projects.getState().project.projectId,"private-A");
-  assert.equal(data.get(key), raw);
-  projects.getState().restoreProjectFromLocalStorage();
-  assert.notEqual(projects.getState().project.projectId,"private-A");
-  setAuthenticatedIdentity("B");
-  projects.getState().acceptServerProject(server);
-  variants.setState({ activeVariantId: server.projectId });
-  globalThis.fetch = async () => Response.json(server);
-  await variants.getState().checkRecoveryDraft();
-  assert.equal(variants.getState().recoveryDraft, null, "even an authorized collaborator cannot recover A's draft");
-  assert.equal(projects.getState().project.projectName, "Saved A");
-
-  setAuthenticatedIdentity("A");projects.getState().restoreProjectFromLocalStorage();
-  assert.notEqual(projects.getState().project.projectId, "private-A", "owner identity alone must not hydrate the stored draft");
-  projects.getState().acceptServerProject(server);
-  variants.setState({ activeVariantId: server.projectId });
-  globalThis.fetch = async () => new Response(null, { status: 403 });
-  await variants.getState().checkRecoveryDraft();
-  assert.equal(variants.getState().recoveryDraft, null);
-  assert.ok(projects.getState().accessError);
-
-  let reads = 0;
-  globalThis.fetch = async (input) => { assert.equal(input, "/api/defense/projects/private-A"); reads++; return Response.json(server); };
-  await variants.getState().checkRecoveryDraft();
-  assert.equal(reads, 1);
-  const record = variants.getState().recoveryDraft;
-  assert.ok(record);
-  assert.equal(projects.getState().project.projectName, "Saved A", "offering recovery must leave the loaded project unchanged");
-  projects.getState().restoreVerifiedDraft(record);
-  assert.equal(projects.getState().project.projectName, "Unsaved A");
-  assert.equal(projects.getState().syncStatus, "dirty");
-  assert.equal(data.has("fortis-defense-project"),false);
- } finally {globalThis.fetch=original;Object.defineProperty(globalThis,"localStorage",{configurable:true,value:storage});}
 });

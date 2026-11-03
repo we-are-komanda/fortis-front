@@ -1,0 +1,38 @@
+.panel { display:flex; flex:1; min-height:0; flex-direction:column; overflow:auto; }
+.toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:1rem; justify-content:space-between; padding:.85rem; border-bottom:1px solid var(--line); }
+.toolbar p { font-size:.8rem; }
+.actions { display:flex; flex-wrap:wrap; gap:.4rem; }
+.content { display:grid; grid-template-columns:minmax(0,1fr); flex:1; min-height:0; }
+.viewport { min-width:0; position:relative; height:32rem; background:var(--scene-ground); overflow:hidden; }
+.plan { width:100%; height:100%; display:block; }
+.plan rect { cursor:pointer; }
+.sidebar { min-width:0; overflow:auto; background:var(--surface); }
+.card { padding:1rem; border-bottom:1px solid var(--line); }
+.objectHeading { display:flex; align-items:center; gap:.65rem; }
+.objectHeading img { width:5.5rem; height:4.6rem; object-fit:contain; }
+.cardBody { min-height:0; }
+.card .actions { padding-top:.65rem; }
+.card dl { margin:1rem 0; font-size:.8rem; }
+.card dl div { display:grid; grid-template-columns:1fr 1.4fr; gap:.6rem; padding:.45rem 0; border-bottom:1px solid var(--line); }
+.card dt { color:var(--secondary); }
+.card dd { margin:0; overflow-wrap:anywhere; }
+.card .small { font-size:.75rem; }
+.filter { display:grid; gap:.45rem; padding:.85rem; font-weight:600; }
+.filter select { width:100%; min-width:0; font-weight:400; }
+.equipmentFilter { display:flex; align-items:center; gap:.5rem; min-height:2.75rem; padding:0 .85rem .5rem; font-size:.75rem; }
+.list { display:grid; gap:.2rem; padding:0 .85rem .85rem; max-height:21rem; overflow:auto; }
+.list button { justify-content:flex-start; text-align:left; }
+.list small { display:block; color:var(--secondary); font-size:.7rem; margin-top:.2rem; }
+.hint { position:absolute; bottom:.6rem; left:.6rem; right:.6rem; width:fit-content; max-width:calc(100% - 1.2rem); background:var(--surface); color:var(--secondary); padding:.4rem .6rem; font-size:.75rem; pointer-events:none; }
+.loading { position:absolute; top:1rem; left:1rem; padding:.65rem; background:var(--surface); }
+.panel .note { padding:.5rem .85rem; border-top:1px solid var(--line); margin:0; font-size:.75rem; }
+.panel .notice { padding:.65rem .85rem; margin:0; }
+@media (min-width:1024px) {
+  .content { grid-template-columns:minmax(0,1fr) 21rem; overflow:hidden; }
+  .viewport { height:100%; min-height:28rem; }
+  .sidebar { border-left:1px solid var(--line); display:flex; flex-direction:column; }
+  .card { flex-shrink:0; max-height:60%; overflow:hidden; display:flex; flex-direction:column; }
+  .cardBody { overflow:auto; }
+  .objectHeading, .card .actions { flex-shrink:0; }
+  .list { flex:1; min-height:7rem; max-height:none; }
+}

@@ -1,0 +1,37 @@
+[
+  {
+    "id": "M07-scrubber",
+    "task_id": "01a159b5-fc31-765b-9d8b-3980f912792d",
+    "size": 51117200,
+    "saved": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/models/M07-scrubber/M07-scrubber-source.glb",
+    "sha256": "2edaa9ed193cb8b86695e945d5ecb66d3d5743036bc6a719297a066f6b9a9a6c"
+  },
+  {
+    "id": "M01-pump",
+    "task_id": "01a159b5-4ab5-74b1-aabf-e0aefba2ec20",
+    "size": 52894160,
+    "saved": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/models/M01-pump/M01-pump-source.glb",
+    "sha256": "d3015fef0751f9329ab53a984403b4070d1b0dabc7c90968ff15f2f467f71e64"
+  },
+  {
+    "id": "M03-heat-exchanger",
+    "task_id": "01a159b5-aff3-744c-87cd-24ef0281ae87",
+    "size": 26937944,
+    "saved": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/models/M03-heat-exchanger/M03-heat-exchanger-source.glb",
+    "sha256": "5c77ed4590b7915933cecf64e569812c67d1d0f76d8e70792c8c7f3905070512"
+  },
+  {
+    "id": "M04-cooling-tower",
+    "task_id": "01a159b5-cf81-74db-8794-1b3c2ec66c5a",
+    "size": 80489112,
+    "saved": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/models/M04-cooling-tower/M04-cooling-tower-source.glb",
+    "sha256": "2be8637f94cb6cf82ce213268fce5b362db75724f462ba3537b9ee08f3b266e3"
+  },
+  {
+    "id": "M16-tanker-truck",
+    "task_id": "01a159b6-1d97-72ca-815c-009ceb9019b2",
+    "size": 70330832,
+    "saved": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/models/M16-tanker-truck/M16-tanker-truck-source.glb",
+    "sha256": "347ab535904168e82006668c11a5b5c9aefcbfa7fbb968017f786205ac51039f"
+  }
+]

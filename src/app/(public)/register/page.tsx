@@ -1,5 +1,5 @@
-import { RegisterPage } from "@/modules/auth/ui/register-page";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <RegisterPage />;
+  redirect("/workspace");
 }
