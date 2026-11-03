@@ -1,7 +1,7 @@
+import { createLegacyDefenseProject as createDefaultDefenseProject } from "../../../../test/fixtures/legacy-defense-project";
 // Run: npx tsx src/modules/defense-calculator/domain/project-report-lines.test.ts
 
 import {
-  createDefaultDefenseProject,
   placeObjectInProject,
   updatePlacedObjectInProject,
 } from "@/shared/lib/defense-project";

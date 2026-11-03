@@ -1,46 +1,33 @@
-// Run: pnpm exec tsx src/shared/config/defense-asset-library.test.ts
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { defenseAssetLibrary } from "./defense-asset-library";
+import { createDefaultDefenseProject, exportDefenseProjectJson, importDefenseProjectJson } from "@/shared/lib/defense-project";
+import { buildPublicAssetSeedPayloads } from "@/modules/drone-defense/infra/seed-backend-asset-library";
+import { normalizeDefenseAssetPayload } from "@/modules/drone-defense/infra/asset-library-api";
 
-import { defenseAssetLibrary } from "@/shared/config/defense-asset-library";
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(message);
+assert.deepEqual(defenseAssetLibrary.map(asset => asset.name), [
+  "ЗУ-23М1", "Анклав", "ЗПК-ЯкБ", "ТПУ-12,7 мм", "Бекас", "ЗУ-23М-1М на базе УРАЛ 4320",
+]);
+assert.equal(new Set(defenseAssetLibrary.map(asset => asset.id)).size, 6);
+for (const asset of defenseAssetLibrary) {
+  assert.equal(asset.pricePerUnitMln, null);
+  assert.equal(asset.unitPriceMinor, null);
+  assert.equal(asset.provenance?.quality, "estimated");
+  assert.equal(asset.provenance?.sourceDate, null, "The undated PDF must not acquire an invented publication date");
+  assert.match(asset.provenance!.sourceLabel, /Презентация ЗПК АО ССТ\.pdf.*с\./);
+  assert.ok(existsSync(`public${asset.iconUrl}`));
+  assert.equal(asset.coverageType, "none", "A supplier specification is not a computed coverage zone");
+  assert.equal(asset.coverageRadius, undefined);
+  assert.equal(asset.score, undefined);
 }
-
-function hasSpec(spec: Record<string, unknown> | undefined) {
-  return Boolean(spec && Object.keys(spec).length > 0);
-}
-
-assert(
-  defenseAssetLibrary
-    .filter((asset) => asset.coverageType !== "none")
-    .every((asset) => typeof asset.coverageRadius === "number" && asset.coverageRadius > 0),
-  "canonical physical assets with map coverage must expose a positive coverage radius",
-);
-
-assert(
-  defenseAssetLibrary
-    .filter((asset) => asset.category === "detection")
-    .every((asset) => hasSpec(asset.detectionSpec)),
-  "canonical detection assets must expose mock detection TTX",
-);
-
-assert(
-  defenseAssetLibrary
-    .filter((asset) => asset.category === "jamming" || asset.category === "spoofing")
-    .every((asset) => hasSpec(asset.ewSpec)),
-  "canonical EW assets must expose mock EW TTX",
-);
-
-assert(
-  defenseAssetLibrary
-    .filter((asset) => asset.category === "kinetic" || asset.category === "interceptor")
-    .every((asset) => hasSpec(asset.weaponSpec)),
-  "canonical kinetic assets must expose mock weapon TTX",
-);
-
-for (const assetId of ["mobile-radar", "barrel-aa", "pantsir-zrpk", "l6-pzrk"]) {
-  const asset = defenseAssetLibrary.find((item) => item.id === assetId);
-  assert(asset?.coverageRadius && asset.coverageRadius > 0, `${assetId} must expose positive coverage for map rendering`);
-}
-
-console.log("defense-asset-library.test.ts: mock TTX contracts passed");
+const imported = importDefenseProjectJson(exportDefenseProjectJson(createDefaultDefenseProject()));
+assert.deepEqual(imported.assetLibrary, defenseAssetLibrary);
+const payloads = buildPublicAssetSeedPayloads();
+assert.equal(payloads.length, 6);
+payloads.forEach((payload, i) => {
+  const restored = normalizeDefenseAssetPayload({ ...payload, id: defenseAssetLibrary[i].id });
+  assert.equal(restored.provenance?.quality, "estimated", "Source-based cards must not be relabelled demo");
+  assert.equal(restored.description, defenseAssetLibrary[i].description);
+  assert.equal(restored.unitPriceMinor, null);
+});
+console.log("SST library: six sourced cards, unknown prices, images and import/seed roundtrip passed");

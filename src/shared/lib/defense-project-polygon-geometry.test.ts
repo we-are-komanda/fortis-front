@@ -1,7 +1,7 @@
+import { createLegacyDefenseProject as createDefaultDefenseProject } from "../../../test/fixtures/legacy-defense-project";
 // Run: npx tsx src/shared/lib/defense-project-polygon-geometry.test.ts
 
 import {
-  createDefaultDefenseProject,
   importDefenseProjectJson,
   placeObjectInProject,
   validateLayerGeometry,

@@ -29,7 +29,6 @@ import type {
   MogWeaponItem,
   PlacedDefenseCompoundProfile,
 } from "@/shared/types/defense-configuration";
-import type { SelectedConfiguration } from "@/shared/types/defense-configuration";
 
 const PROJECT_SCHEMA_VERSION = 1;
 
@@ -1299,20 +1298,6 @@ export function projectToCalculatorConfiguration(project: DefenseProject): Proje
     name: project.projectName,
     lines: [...quantities.entries()].map(([assetId, quantity]) => ({ assetId, quantity })),
   };
-}
-
-export function legacySelectedConfigurationToProject(configuration: SelectedConfiguration): DefenseProject {
-  let project = createDefaultDefenseProject();
-  project = {
-    ...project,
-    projectName: configuration.name,
-    source: "legacy-migration",
-    basePresetId: configuration.basePresetId,
-  };
-  return applyAssetQuantityDraftsToProject(
-    project,
-    Object.entries(configuration.selectedItems).map(([assetId, quantity]) => ({ assetId, quantity })),
-  );
 }
 
 export function exportDefenseProjectJson(project: DefenseProject): string {

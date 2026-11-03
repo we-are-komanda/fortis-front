@@ -27,6 +27,8 @@ test("concurrent entry creates once and lost response retries exactly the same p
  loseResponse=false;
  assert.equal(await openDefaultMap(),"created");
  assert.equal(writes.length,2);
+ const payload = JSON.parse(writes[0].body as string);
+ assert.deepEqual(JSON.parse(payload.projectJson).baseObject.center, {lat: -41.2865, lng: 174.7762});
  assert.deepEqual(writes[0],writes[1]);
 });
 test("list errors never create a replacement project", async () => {

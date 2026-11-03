@@ -4,10 +4,10 @@ import { readFileSync } from "node:fs";
 const gisBoardSource = readFileSync("src/modules/drone-defense/ui/gis-board.tsx", "utf8");
 
 assert(
-  gisBoardSource.includes('icon="map.zoom-in"') &&
-    gisBoardSource.includes('label="Приблизить карту"') &&
-    gisBoardSource.includes('icon="map.zoom-out"') &&
-    gisBoardSource.includes('label="Отдалить карту"'),
+  gisBoardSource.includes('aria-label="Приблизить карту"') &&
+    gisBoardSource.includes('onClick={() => adjustMapZoom(1)}') &&
+    gisBoardSource.includes('aria-label="Отдалить карту"') &&
+    gisBoardSource.includes('onClick={() => adjustMapZoom(-1)}'),
   "GisBoard must expose clickable map zoom controls",
 );
 assert(

@@ -25,7 +25,7 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       ...(isDesktop ? [{ source: "/:path*", headers: [
-        { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://tile.openstreetmap.org https://tile.opentopomap.org; font-src 'self' data:; connect-src 'self' blob: data: https://tiles.openfreemap.org https://tile.openstreetmap.org https://tile.opentopomap.org; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'" },
+        { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://tile.openstreetmap.org https://tile.opentopomap.org https://tiles.api-maps.yandex.ru; font-src 'self' data:; connect-src 'self' blob: data: https://tiles.openfreemap.org https://tile.openstreetmap.org https://tile.opentopomap.org https://tiles.api-maps.yandex.ru; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'" },
       ] }] : []),
       {
         source: "/models/:path*",

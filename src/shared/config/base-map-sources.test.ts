@@ -79,3 +79,21 @@ assert(
   resolveMapStyle(configuredInternalSource) === "/maps/internal/style.json",
   "internal basemap style URL env must be passed through as the selected style",
 );
+
+const yandexEnv = testEnv({ NEXT_PUBLIC_FORTIS_YANDEX_MAPS_API_KEY: "test-key&injected=1" });
+const yandexSources = getAvailableBaseMapSources(yandexEnv);
+const yandex = yandexSources.find(source => source.id === "yandex-maps");
+assert(yandex, "Yandex Tiles API must be available when a key is configured");
+assert(!getAvailableBaseMapSources(testEnv()).some(source => source.id === "yandex-maps"), "Yandex must stay unavailable without a key");
+assert(!getAvailableBaseMapSources({...yandexEnv, NEXT_PUBLIC_FORTIS_ALLOW_EXTERNAL_BASEMAPS: "false"}).some(source => source.id === "yandex-maps"), "Closed contour must exclude Yandex even with a key");
+const yandexStyle = resolveMapStyle(yandex);
+assert(typeof yandexStyle !== "string", "Yandex must use the existing raster renderer");
+const yandexRaster = yandexStyle.sources.raster;
+assert(yandexRaster.type === "raster" && yandexRaster.tiles?.length === 1, "Yandex must have one official tile endpoint");
+const yandexUrl = new URL(yandexRaster.tiles[0]);
+assert(yandexUrl.origin === "https://tiles.api-maps.yandex.ru", "Yandex tiles must use the official API");
+assert(yandexUrl.searchParams.get("apikey") === "test-key&injected=1" && !yandexUrl.searchParams.has("injected"), "API key must be escaped as a query value");
+assert(yandexUrl.searchParams.get("projection") === "web_mercator", "Yandex must match DeckGL and MapLibre coordinates");
+assert(yandexRaster.maxzoom === 20 && yandexRaster.tileSize === 256, "Zoom beyond 20 must overzoom supported Yandex tiles");
+assert(resolveDefaultBaseMapSourceId(yandexSources, yandexEnv) === "yandex-maps", "Configured Yandex must become the default");
+assert(resolveDefaultBaseMapSourceId(yandexSources, {...yandexEnv, NEXT_PUBLIC_FORTIS_DEFAULT_BASEMAP: "osm-standard"}) === "osm-standard", "An explicit default must still be respected");

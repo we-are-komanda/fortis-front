@@ -1,10 +1,10 @@
+import { createLegacyDefenseProject as createDefaultDefenseProject } from "../../../../test/fixtures/legacy-defense-project";
 // Run: npx tsx src/modules/defense-calculator/domain/project-asset-adapter.test.ts
 
 import { readFileSync } from "node:fs";
 import { defaultThresholds } from "@/modules/defense-calculator/infra/catalog-data";
 import { computeWeightedScore, priorityForScore } from "@/modules/defense-calculator/domain/scoring";
 import { projectAssetsToCalculatorAssets } from "@/modules/defense-calculator/domain/project-asset-adapter";
-import { createDefaultDefenseProject } from "@/shared/lib/defense-project";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

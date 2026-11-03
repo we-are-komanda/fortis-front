@@ -1,4 +1,4 @@
-import { defenseAssetLibrary } from "@/shared/config/defense-asset-library";
+import { legacyDefenseAssets as defenseAssetLibrary } from "../../../../test/fixtures/legacy-defense-project";
 import {
   buildPlacedDefenseCompoundProfile,
   getVisibleMogCoverageWeaponIds,

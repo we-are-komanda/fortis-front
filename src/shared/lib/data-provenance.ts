@@ -1,4 +1,4 @@
-import { defenseAssetLibrary } from "@/shared/config/defense-asset-library";
+import { defenseItems } from "@/shared/config/defense-catalog";
 import { FortisProtocolError, isRecord } from "./api-client";
 import type { DataProvenance } from "@/shared/types/finance";
 
@@ -27,13 +27,18 @@ export function preserveDemoAssetSources(asset: {
   provenance?: DataProvenance | null;
   fieldProvenance?: Record<string, DataProvenance>;
 }): { provenance?: DataProvenance | null; fieldProvenance?: Record<string, DataProvenance> } {
-  const seed = defenseAssetLibrary.find(item => item.id === asset.id || item.id === asset.legacyItemId);
-  if (!seed?.provenance) return {
+  const isLegacyDemo = defenseItems.some(item => item.id === asset.id || item.id === asset.legacyItemId);
+  if (!isLegacyDemo) return {
     ...("provenance" in asset ? { provenance: asset.provenance } : {}),
     ...("fieldProvenance" in asset ? { fieldProvenance: asset.fieldProvenance } : {}),
   };
   return {
-    provenance: {...(asset.provenance ?? seed.provenance), quality: "demo"},
+    provenance: {...(asset.provenance ?? {
+      sourceLabel: "Демонстрационный каталог Fortis",
+      sourceDocumentId: null, sourceUrl: null, sourceDate: null,
+      recordedAt: "2026-09-20T00:00:00Z", recordedBy: "bundled-demo",
+      revision: "demo-catalog-v1",
+    }), quality: "demo"},
     fieldProvenance: asset.fieldProvenance && Object.fromEntries(Object.entries(asset.fieldProvenance)
       .map(([field, source]) => [field, {...source, quality: "demo"}])),
   };

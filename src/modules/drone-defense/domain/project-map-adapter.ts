@@ -30,6 +30,7 @@ export function placedObjectsToMapPlacements({
         catalogGroupName: label,
         iconUrl: projectAsset?.iconUrl,
         markerCategory: projectAsset?.category,
+        markerAssetId: projectAsset?.legacyItemId ?? projectAsset?.id ?? object.assetId,
         mapRef: {
           lat: object.coordinates.lat,
           lon: object.coordinates.lng,

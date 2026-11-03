@@ -7,9 +7,11 @@ import { protectionRule, sectorColors, darkSectorColors, type MotionMarker } fro
 import { positionAt, type Track } from "../../domain/scenario-playback";
 import { trees, trackColors, darkTrackColors, contours, roads, waterOutline, terrainGrid, terrainElevation, zoomPixelsPerKm, type ScenarioLayers } from "../../domain/scenario-site";
 
+import type { ProjectScenario } from "../../domain/project-scenario";
+import { ProjectSite3D } from "./project-scenario-site";
 import { FactoryCampus } from "./factory-campus-3d";
 
-type Props = { markers?: MotionMarker[]; selectedObject?: string; onSelectObject: (id: string) => void; onZoom:(zoom:number)=>void; onFocusCampus:()=>void; tracks: Track[]; timeMs: number; layers: ScenarioLayers; zoom: number; fit: number; preview: boolean; dark: boolean; onReady: () => void; onError: () => void };
+type Props = { projectScene?: ProjectScenario; protectionRadiusM?: number; markers?: MotionMarker[]; selectedObject?: string; onSelectObject: (id: string) => void; onZoom:(zoom:number)=>void; tracks: Track[]; timeMs: number; layers: ScenarioLayers; zoom: number; fit: number; preview: boolean; dark: boolean; onReady: () => void; onError: () => void };
 function Lifecycle({ onReady, onError, zoom, fit, onZoom }: Pick<Props, "onReady" | "onError" | "zoom" | "fit" | "onZoom">) {
   const { gl, camera, invalidate, controls, size } = useThree();
   useEffect(() => {
@@ -30,14 +32,15 @@ function Lifecycle({ onReady, onError, zoom, fit, onZoom }: Pick<Props, "onReady
     if ("setViewOffset" in camera) camera.setViewOffset(size.width, size.height, size.width > 520 ? size.width * .04 : 0, -size.height * .03, size.width, size.height);
     camera.updateProjectionMatrix(); camera.updateMatrixWorld(); invalidate();
   }, [camera, invalidate, zoom, size.width, size.height, controls, fit]);
-  return <OrbitControls makeDefault enableDamping={false} minZoom={zoomPixelsPerKm(size.width,size.height)} maxZoom={128*zoomPixelsPerKm(size.width,size.height)} maxPolarAngle={Math.PI / 2.1}
-    onEnd={()=>onZoom(Math.max(1,Math.min(128,camera.zoom/zoomPixelsPerKm(size.width,size.height))))}/>;
+  return <OrbitControls makeDefault enableDamping={false} minZoom={.01*zoomPixelsPerKm(size.width,size.height)} maxZoom={128*zoomPixelsPerKm(size.width,size.height)} maxPolarAngle={Math.PI / 2.1}
+    onEnd={()=>onZoom(Math.max(.01,Math.min(128,camera.zoom/zoomPixelsPerKm(size.width,size.height))))}/>;
 }
 const initialCamera = { position: [12, 18, 22] as [number, number, number], zoom: 35, near: .1, far: 150 };
 function ScenarioMap3D(props: Props) {
-  const { tracks, timeMs, layers, dark, preview } = props;
+  const { tracks, timeMs, layers, dark, preview, projectScene, protectionRadiusM = protectionRule.radiusM } = props;
+  const terrain = layers.terrain && !projectScene;
   const contourPoints = useMemo(() => contours.map(path => path.map(([x,y]) => [x/1000, terrainElevation(x,y)/1000+.0005, -y/1000] as [number,number,number])), []);
-  const roadPoints = useMemo(() => roads.map(road => road.map(([x,y]) => [x/1000, (layers.terrain ? terrainElevation(x,y) : 0)/1000+.0006, -y/1000] as [number,number,number])), [layers.terrain]);
+  const roadPoints = useMemo(() => roads.map(road => road.map(([x,y]) => [x/1000, (terrain ? terrainElevation(x,y) : 0)/1000+.0006, -y/1000] as [number,number,number])), [terrain]);
   const trackPoints = useMemo(() => tracks.map(track => ({ flight: track.samples.map(s => [s.xM/1000,s.zM/1000,-s.yM/1000] as [number,number,number]), ground: track.samples.map(s => [s.xM/1000,.045,-s.yM/1000] as [number,number,number]) })), [tracks]);
   const water = useMemo(() => {
     const shape = new Shape();
@@ -46,16 +49,16 @@ function ScenarioMap3D(props: Props) {
   }, []);
   const ring = useMemo(() => Array.from({ length: 129 }, (_, i) => [10 * Math.cos(i / 128 * Math.PI * 2), .02, 10 * Math.sin(i / 128 * Math.PI * 2)] as [number, number, number]), []);
   const protectionRing = useMemo(() => Array.from({ length: 129 }, (_, i) => {
-    const angle = i / 128 * Math.PI * 2, x = protectionRule.radiusM * Math.cos(angle), y = protectionRule.radiusM * Math.sin(angle);
-    return [x / 1000, ((layers.terrain ? terrainElevation(x, y) : 0) + 3) / 1000, -y / 1000] as [number, number, number];
-  }), [layers.terrain]);
+    const angle = i / 128 * Math.PI * 2, x = protectionRadiusM * Math.cos(angle), y = protectionRadiusM * Math.sin(angle);
+    return [x / 1000, ((terrain ? terrainElevation(x, y) : 0) + 3) / 1000, -y / 1000] as [number, number, number];
+  }), [terrain, protectionRadiusM]);
   const ground = dark ? "#283b37" : "#e7ecdf";
   return <Canvas orthographic camera={initialCamera} frameloop="demand" dpr={[1, 1.5]} gl={{ antialias: true }}>
     <color attach="background" args={[ground]} />
     <ambientLight intensity={1.6} /><directionalLight position={[-8, 18, 10]} intensity={1.6} />
     <group>
-    <Terrain dark={dark} visible={layers.terrain} />
-    {layers.terrain && <group>
+    <Terrain dark={dark} visible={terrain} />
+    {terrain && <group>
       {props.zoom<8 && <TerrainGrid dark={dark}/>}
       {contourPoints.map((path, i) => <Line toneMapped={false} key={i} points={path} color={dark ? "#587464" : "#aebda0"} lineWidth={.7} transparent opacity={.85} />)}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, .0003, 0]}><shapeGeometry args={[water]} /><meshBasicMaterial depthTest={false} toneMapped={false} color={dark ? "#31576a" : "#b7dce3"} /></mesh>
@@ -63,14 +66,13 @@ function ScenarioMap3D(props: Props) {
       {props.zoom >= 8 && <><Html center position={[-.5, .08, -.4]} style={{pointerEvents:"none",whiteSpace:"nowrap",fontSize:11,color:dark?"#a4b6cd":"#60738c"}}>Лесной массив</Html>
       <Html center position={[-.5, .1, .4]} style={{pointerEvents:"none",whiteSpace:"nowrap",fontSize:11,color:dark?"#a4b6cd":"#60738c"}}>Холмы</Html></>}
     </group>}
-    {roadPoints.map((road, i) => <Line key={i} toneMapped={false}
+    {!projectScene && roadPoints.map((road, i) => <Line key={i} toneMapped={false}
       points={road}
       color={dark ? "#808a86" : "#faf9f1"} worldUnits lineWidth={.012} />)}
-    {layers.enterprise && <group scale={.001}>
+    {layers.enterprise && (projectScene ? <ProjectSite3D scene={projectScene} zoom={props.zoom} selected={props.selectedObject} onSelect={props.onSelectObject}/> : <group scale={.001}>
       <FactoryCampus selected={props.selectedObject} onSelect={props.onSelectObject}/>
-    </group>}
+    </group>)}
     {props.markers && <Line name="training-protection-boundary" points={protectionRing} color={dark ? "#5eead4" : "#047857"} lineWidth={2} toneMapped={false} />}
-    {props.zoom<8 && <Html center position={[0,.03,0]}><button style={{whiteSpace:"nowrap"}} onClick={props.onFocusCampus} aria-label="Приблизить предприятие">Предприятие · 4 комплекса</button></Html>}
     {layers.radius && <Line toneMapped={false} points={ring} color={dark ? "#a4b6cd" : "#60738c"} dashed dashSize={.14} gapSize={.14} lineWidth={1} />}
     {tracks.map((track, i) => {
       const p = positionAt(track, timeMs);
@@ -86,7 +88,7 @@ function ScenarioMap3D(props: Props) {
     })}
     </group>
     {props.markers && layers.radius && [["С",0,-10.5],["В",10.5,0],["Ю",0,10.5],["З",-10.5,0]].map(([label,x,z]) => <Html key={String(label)} center position={[Number(x),.1,Number(z)]} style={{pointerEvents:"none",fontSize:12,color:dark?"#afbed1":"#526782"}}>{label}</Html>)}
-    {props.markers && <MassMarkers markers={props.markers} zoom={props.zoom} dark={dark} showTrails={layers.tracks} terrain={layers.terrain} />}
+    {props.markers && <MassMarkers markers={props.markers} zoom={props.zoom} dark={dark} showTrails={layers.tracks} terrain={terrain} />}
     <Lifecycle {...props} />
   </Canvas>;
 }

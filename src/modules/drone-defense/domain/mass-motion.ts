@@ -26,13 +26,14 @@ function randomSource(seed: number) {
     return ((value ^ value >>> 14) >>> 0) / 4294967296;
   };
 }
-export function generateRun(config: MotionConfig, library: Library, index: number): MotionRun {
+export function generateRun(config: MotionConfig, library: Library, index: number, protectionRadiusM: number = protectionRule.radiusM): MotionRun {
   const { durationMs, count, seed, scatter } = config;
   if ((!Number.isInteger(durationMs / 60000) || durationMs < 1800000 || durationMs > 5400000) || !Number.isInteger(count) || count < 1 || count > 1000 ||
     !Number.isInteger(seed) || seed < 0 || seed > 0xffffffff || !Number.isFinite(scatter) || scatter < 0 || scatter > .5 ||
     !Number.isInteger(index) || index < 0 || index > 0xffffffff) throw new Error("Некорректные параметры массового прогона.");
   const validation = validateLibrary({ scene: library.scene, tracks: [], exercises: [] });
   if (validation.sceneError) throw new Error("Несовместимая версия сцены.");
+  if (!Number.isFinite(protectionRadiusM) || protectionRadiusM <= 0 || protectionRadiusM >= library.scene.radiusM) throw new Error("Некорректная граница условной зоны защиты.");
   const runSeed = (seed + Math.imul(index, 0x9e3779b9)) >>> 0;
   const random = randomSource(runSeed);
   const directionRandom = randomSource(runSeed ^ 0xa511e9b3);
@@ -44,7 +45,7 @@ export function generateRun(config: MotionConfig, library: Library, index: numbe
     const duration = DURATION_MS * (1 + scatter * (2 * random() - 1));
     const slot = count > 1 ? id / (count - 1) : 0;
     const startMs = ((1 - scatter) * slot + scatter * random()) * (durationMs - duration);
-    return { id, bearingDeg, sector: sectorAt(bearingDeg), start: point(library.scene.radiusM), end: point(protectionRule.radiusM), durationMs: duration, startMs, endMs: startMs + duration };
+    return { id, bearingDeg, sector: sectorAt(bearingDeg), start: point(library.scene.radiusM), end: point(protectionRadiusM), durationMs: duration, startMs, endMs: startMs + duration };
   });
   return { index, seed: runSeed, durationMs, objects };
 }
@@ -96,13 +97,13 @@ export function summarizeBatch(results: Pick<RunSummary, "peak" | "mean" | "sect
   return { min: peaks[0], median: peaks[Math.ceil(.5 * peaks.length) - 1], p90: peaks[Math.ceil(.9 * peaks.length) - 1], max: peaks.at(-1)!,
     meanActive: results.reduce((sum, run) => sum + run.mean, 0) / results.length, sectorP90 };
 }
-export async function computeBatch(config: MotionConfig, library: Library, count: number, signal: AbortSignal, onProgress: (completed: number) => void) {
+export async function computeBatch(config: MotionConfig, library: Library, count: number, signal: AbortSignal, onProgress: (completed: number) => void, protectionRadiusM: number = protectionRule.radiusM) {
   if (count !== 100 && count !== 500) throw new Error("Пакет должен содержать 100 или 500 прогонов.");
   const results: RunSummary[] = [];
   // ponytail: <=1000 objects / 500 runs, yielding every 10 runs; move to a Worker if measured input latency becomes unacceptable.
   for (let index = 0; index < count; index++) {
     signal.throwIfAborted();
-    const { index: runIndex, seed, peak, mean, sectorPeaks } = summarizeRun(generateRun(config, library, index));
+    const { index: runIndex, seed, peak, mean, sectorPeaks } = summarizeRun(generateRun(config, library, index, protectionRadiusM));
     results.push({ index: runIndex, seed, peak, mean, sectorPeaks });
     if ((index + 1) % 10 === 0) { onProgress(index + 1); await new Promise(resolve => setTimeout(resolve, 0)); }
   }

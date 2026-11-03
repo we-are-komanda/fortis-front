@@ -13,7 +13,6 @@ import {
   duplicatePlacedObjectInProject,
   exportDefenseProjectJson,
   importDefenseProjectJson,
-  legacySelectedConfigurationToProject,
   movePlacedObjectInProject,
   placeObjectInProject,
   recenterProject,
@@ -28,7 +27,6 @@ import {
   validateLayerGeometry,
   validateObjectPlacement,
 } from "@/shared/lib/defense-project";
-import { loadPresetIntoConfiguration } from "@/shared/lib/defense-configuration";
 import { defenseAssetLibrary } from "@/shared/config/defense-asset-library";
 import { fetchAssetLibrary, type FetchAssetLibraryOptions } from "@/modules/drone-defense/infra/asset-library-api";
 import { fetchEnterprises, type FetchEnterprisesOptions } from "@/modules/drone-defense/infra/enterprise-api";
@@ -77,6 +75,7 @@ type DefenseProjectState = {
   budgetApplied: boolean;
   assetLibraryLoading: boolean;
   assetLibraryError: string | null;
+  availableCatalog: { projectId: string; assetIds: string[] } | null;
   assetLibraryPreview: { baseProject: DefenseProject; assets: DefenseAsset[]; generation: number } | null;
   applyAssetLibraryPreview: () => boolean;
   discardAssetLibraryPreview: () => void;
@@ -123,7 +122,6 @@ type DefenseProjectState = {
   deletePlacedObject: (objectId: string) => void;
   duplicatePlacedObject: (objectId: string) => void;
   validateObjectPlacement: (assetId: string, layerId: string, coordinates: Coordinates) => PlacementValidationResult;
-  loadPresetProject: (presetId: string) => void;
   replaceProject: (project: DefenseProject) => void;
   applyBudgetSelection: (picks: Array<{ assetId: string; included: boolean }>) => void;
   refreshAssetLibrary: (
@@ -268,6 +266,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     localDraftsEnabled: false,
     setLocalDraftsEnabled: (localDraftsEnabled) => set({ localDraftsEnabled }),
     setRuntimeMode: (runtimeMode) => {
+      if (get().runtimeMode !== runtimeMode) set({ availableCatalog: null });
       set({ runtimeMode });
       if (runtimeMode === "demo" && !get().hydrated && get().project.source !== "backend") {
         set({ project: createDefaultDefenseProject(), hydrated: true, syncStatus: "unverified" });
@@ -276,6 +275,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     budgetApplied: false,
     assetLibraryLoading: false,
     assetLibraryError: null,
+    availableCatalog: null,
     assetLibraryPreview: null,
     protectedObjects: [],
     protectedObjectsLoading: false,
@@ -525,16 +525,6 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     deletePlacedObject: (objectId) => applyProject(deletePlacedObjectInProject(get().project, objectId), set),
     duplicatePlacedObject: (objectId) => applyProject(duplicatePlacedObjectInProject(get().project, objectId), set),
     validateObjectPlacement: (assetId, layerId, coordinates) => validateObjectPlacement(get().project, assetId, layerId, coordinates),
-    loadPresetProject: (presetId) => {
-      if (get().runtimeMode !== "demo") return;
-      const legacy = loadPresetIntoConfiguration(presetId);
-      const project = {
-        ...legacySelectedConfigurationToProject(legacy),
-        source: "preset" as const,
-        basePresetId: presetId,
-      };
-      applyProject(project, set);
-    },
     replaceProject: (project) => applyProject(project, set),
     applyBudgetSelection: (picks) => {
       const lines = picks
@@ -556,7 +546,9 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         for (const asset of assets) merged.set(asset.id,asset);
         const nextAssets = [...merged.values()];
         const changed = JSON.stringify(nextAssets) !== JSON.stringify(startingProject.assetLibrary);
-        set({ assetLibraryLoading: false, assetLibraryError: null, assetLibraryPreview: changed ? {baseProject: startingProject, assets: nextAssets, generation} : null });
+        set({ assetLibraryLoading: false, assetLibraryError: null,
+          availableCatalog: { projectId: startingProject.projectId, assetIds: assets.map(asset => asset.id) },
+          assetLibraryPreview: changed ? {baseProject: startingProject, assets: nextAssets, generation} : null });
         if (startingProject.source !== "backend" && startingProject.assetLibrary.length === 0 && startingProject.placedObjects.length === 0 && changed) get().applyAssetLibraryPreview();
       } catch (error) {
         if (generation !== sessionGeneration()) return;

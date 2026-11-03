@@ -1,90 +1,14 @@
 "use client";
 
-import {
-  ApiOutlined,
-  ApartmentOutlined,
-  BuildOutlined,
-  ClusterOutlined,
-  CompassOutlined,
-  EyeOutlined,
-  GlobalOutlined,
-  RadarChartOutlined,
-  SafetyCertificateOutlined,
-  VideoCameraOutlined,
-} from "@ant-design/icons";
-import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { defenseAssetSymbols, getDefenseAssetSymbolId } from "@/shared/config/defense-asset-symbols";
+import { DefenseAssetSymbol } from "@/shared/ui/defense-asset-symbol";
+import { useCallback, useEffect, useRef, type CSSProperties } from "react";
 import type { EchelonMapPlacement } from "@/modules/drone-defense/domain/echelon-map-model";
 
 export type MapMarkerState = "default" | "hover" | "selected" | "disabled" | "warning" | "conflict" | "inactive";
 
-export const ASSET_CATEGORY_COLORS: Record<string, string> = {
-  "early-warning": "#10b981",
-  detection: "#2563eb",
-  classification: "#38bdf8",
-  jamming: "#f97316",
-  spoofing: "#a855f7",
-  kinetic: "#ef4444",
-  interceptor: "#dc2626",
-  "passive-protection": "#64748b",
-  "engineering-protection": "#6b7280",
-  infrastructure: "#14b8a6",
-  software: "#8b5cf6",
-  "command-center": "#059669",
-  "external-service": "#0f766e",
-};
-
-const layerCategoryFallback: Record<string, string> = {
-  layer_01_external_warning: "early-warning",
-  layer_02_detection: "detection",
-  layer_03_identification: "classification",
-  layer_04_suppression: "jamming",
-  layer_05_mid_range_kinetic: "kinetic",
-  layer_06_last_line_kinetic: "interceptor",
-  layer_07_accuracy_disruption: "passive-protection",
-  layer_08_passive_protection: "passive-protection",
-  layer_09_hardening: "engineering-protection",
-};
-
-export function getAssetCategoryColor(placement: EchelonMapPlacement) {
-  const category = placement.markerCategory ?? layerCategoryFallback[placement.layerId] ?? "infrastructure";
-  return ASSET_CATEGORY_COLORS[category] ?? ASSET_CATEGORY_COLORS.infrastructure;
-}
-
-export function getAssetMarkerIcon(placement: EchelonMapPlacement): ReactNode {
-  const category = placement.markerCategory ?? layerCategoryFallback[placement.layerId] ?? "infrastructure";
-  const label = placement.label.toLowerCase();
-  if (label.includes("osint")) return <GlobalOutlined />;
-  if (label.includes("комендат") || label.includes("штаб")) return <ApartmentOutlined />;
-  if (label.includes("тепловиз")) return <EyeOutlined />;
-  if (label.includes("опти") || label.includes("кам")) return <VideoCameraOutlined />;
-  if (label.includes("рлс") || label.includes("радар")) return <RadarChartOutlined />;
-  if (label.includes("рэб") || label.includes("подав") || label.includes("спуф")) return <ApiOutlined />;
-  if (label.includes("турел") || label.includes("перехв")) return <CompassOutlined />;
-  if (label.includes("сет") || label.includes("барьер") || label.includes("защит")) return <SafetyCertificateOutlined />;
-
-  switch (category) {
-    case "early-warning":
-    case "command-center":
-      return <ApartmentOutlined />;
-    case "detection":
-      return <RadarChartOutlined />;
-    case "classification":
-      return <EyeOutlined />;
-    case "jamming":
-    case "spoofing":
-      return <ApiOutlined />;
-    case "kinetic":
-    case "interceptor":
-      return <CompassOutlined />;
-    case "passive-protection":
-    case "engineering-protection":
-      return <SafetyCertificateOutlined />;
-    case "software":
-    case "external-service":
-      return <ClusterOutlined />;
-    default:
-      return <BuildOutlined />;
-  }
+export function getAssetMarkerIcon(placement: EchelonMapPlacement) {
+  return <DefenseAssetSymbol symbolId={getDefenseAssetSymbolId(placement.markerAssetId)} />;
 }
 
 export function getMarkerState(placement: EchelonMapPlacement, isHovered: boolean): MapMarkerState {
@@ -130,12 +54,11 @@ export function MapObjectMarker({
 }: MapObjectMarkerProps) {
   const pendingClickRef = useRef<number | null>(null);
   const state = getMarkerState(placement, isHovered);
-  const categoryColor = getAssetCategoryColor(placement);
+  const symbol = defenseAssetSymbols[getDefenseAssetSymbolId(placement.markerAssetId)];
   const showLabel = shouldShowLabel({ zoom, isSelected: Boolean(placement.isSelected), isHovered });
-  const markerSize = placement.isSelected ? 46 : isHovered ? 40 : 36;
+  const markerSize = placement.isSelected ? 48 : 44;
   const markerBadge = placement.qty > 1 ? placement.qty : null;
   const markerStyle = {
-    "--marker-color": categoryColor,
     left: x,
     top: y,
     width: markerSize,
@@ -153,15 +76,15 @@ export function MapObjectMarker({
   return (
     <button
       type="button"
-      className={`pointer-events-auto absolute z-20 grid place-items-center rounded-[11px] border-2 bg-slate-950/90 text-[17px] text-white shadow-lg shadow-slate-950/30 outline-none transition duration-150 hover:scale-[1.08] focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950 ${
-        placement.isSelected ? "ring-2 ring-white/90" : ""
-      } border-[var(--marker-color)]`}
+      className={`pointer-events-auto absolute z-20 grid place-items-center rounded-md border bg-white/95 text-black shadow-sm outline-none transition duration-150 hover:scale-[1.08] focus-visible:ring-2 focus-visible:ring-blue-600 focus-visible:ring-offset-2 ${
+        placement.isSelected ? "border-blue-600 ring-2 ring-blue-600/30" : "border-slate-300"
+      }`}
       style={markerStyle}
       aria-label={`${placement.label}, ${layerLabel ?? placement.layerId}, ${placement.qty} ед.`}
-      title={`${placement.label}${layerLabel ? ` · ${layerLabel}` : ""}`}
+      title={`${placement.label} · ${symbol.label}${layerLabel ? ` · ${layerLabel}` : ""}`}
       data-testid={`map-object-marker-${placement.sourcePlacementId}`}
       data-marker-state={state}
-      data-marker-category={placement.markerCategory ?? layerCategoryFallback[placement.layerId] ?? "infrastructure"}
+      data-marker-category={placement.markerCategory ?? "infrastructure"}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => {
         event.stopPropagation();
@@ -187,10 +110,6 @@ export function MapObjectMarker({
       <span className="grid place-items-center" aria-hidden="true">
         {getAssetMarkerIcon(placement)}
       </span>
-      <span
-        className="absolute -bottom-0.5 -left-0.5 h-2 w-2 rounded-full border border-slate-950 bg-[var(--marker-color)]"
-        aria-hidden="true"
-      />
       {markerBadge ? (
         <span className="markerBadge absolute -right-1.5 -top-1.5 grid min-h-4 min-w-4 place-items-center rounded-full bg-slate-950 px-1 text-[10px] font-black leading-none text-white ring-1 ring-white/80">
           {markerBadge}

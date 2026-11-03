@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { CloseOutlined, DownOutlined, UpOutlined } from "@ant-design/icons";
 import DeckGL, { type DeckGLRef } from "@deck.gl/react";
 import { H3HexagonLayer } from "@deck.gl/geo-layers";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import { Layer, WebMercatorViewport } from "@deck.gl/core";
 import MaplibreMap from "react-map-gl/maplibre";
+import Image from "next/image";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { defenseLayers, type EchelonCatalogGroup } from "@/modules/drone-defense/infra/mock-defense-data";
 import {
@@ -14,6 +16,7 @@ import {
   buildMapScaleBar,
   buildPlacementFocusViewState,
   buildProtectedObjectInitialViewState,
+  buildProtectedObjectWorkingViewState,
   buildProtectedObjectPerimeter,
   type EchelonMapPlacement,
   type EchelonMapSlot,
@@ -37,7 +40,6 @@ import {
   buildSectorPolygon,
   getCoverageShapes,
   getMarkerState,
-  screenPointToSlot,
   type MarkerState,
 } from "@/modules/drone-defense/domain/placement-helpers";
 import type {
@@ -57,6 +59,7 @@ type GisBoardProps = {
   facilities: Facility[];
   selectedFacilityId: string;
   onSelectFacility: (facilityId: string) => void;
+  onOpenModeling?: () => void;
   hexCells: HexCell[];
   threatRoutes: ThreatRoute[];
   layers: DefenseLayersResponse | null;
@@ -67,6 +70,7 @@ type GisBoardProps = {
   selectedLayerId: string;
   selectedSlotId: string | null;
   activeToolId: string | null;
+  draggedAssetId?: string | null;
   baseMapSourceId: string;
   placementHint: string;
   onSelectBaseMapSource: (sourceId: string) => void;
@@ -84,7 +88,7 @@ type GisBoardProps = {
   selectedPlacementId: string | null;
   locateTarget: { lon: number; lat: number; at: number } | null;
   onSelectPlacement: (placementId: string) => void;
-  onDropAsset: (args: { groupId: string; layerId: DefenseLayerId; slotId: string; mapRef: { lon: number; lat: number } }) => void;
+  onDropAsset: (args: { groupId: string; layerId: DefenseLayerId; mapRef: { lon: number; lat: number } }) => void;
 };
 
 function hexCoverageByLayer(layerCoverage: DefenseLayersResponse | null) {
@@ -104,7 +108,7 @@ const fallbackViewState: LayerFocusViewState = {
 const layerFocusTransitionDurationMs = 1600;
 const placementFocusTransitionDurationMs = 650;
 const mapInteractionMinZoom = 6;
-const mapInteractionMaxZoom = 18;
+const mapInteractionMaxZoom = 24;
 const mapControlZoomStep = 0.8;
 const browserZoomWheelStep = 0.7 / 3;
 const deckControllerOptions = {
@@ -203,6 +207,7 @@ export function GisBoard({
   facilities,
   selectedFacilityId,
   onSelectFacility,
+  onOpenModeling,
   hexCells,
   threatRoutes,
   layers,
@@ -213,6 +218,7 @@ export function GisBoard({
   selectedLayerId,
   selectedSlotId,
   activeToolId,
+  draggedAssetId,
   baseMapSourceId,
   placementHint,
   onSelectBaseMapSource,
@@ -263,8 +269,8 @@ export function GisBoard({
   const [hoveredPlacementId, setHoveredPlacementId] = useState<string | null>(null);
   const [isBaseMapMenuOpen, setIsBaseMapMenuOpen] = useState(false);
   const [baseMapWarning, setBaseMapWarning] = useState<string | null>(null);
+  const [mapNoticeState, setMapNoticeState] = useState<"expanded" | "collapsed" | "hidden">("expanded");
   const [boardSize, setBoardSize] = useState({ width: 0, height: 0 });
-  const [dropPreviewSlotId, setDropPreviewSlotId] = useState<string | null>(null);
   const [viewState, setViewState] = useState<LayerFocusViewState>(initialViewState);
   const boardRef = useRef<HTMLElement | null>(null);
   const baseMapMenuRef = useRef<HTMLDivElement | null>(null);
@@ -693,7 +699,7 @@ export function GisBoard({
                 ? ([15, 23, 42, 255] as [number, number, number, number])
                 : ([100, 116, 139, 95] as [number, number, number, number]);
           const handleZoneClick = (object: EchelonZone | null | undefined) => {
-            if (!object) return;
+            if (!object || activeToolId) return;
             if (previewLayer?.id === object.layerId) return;
             onSelectLayer(object.layerId);
           };
@@ -917,6 +923,7 @@ export function GisBoard({
         }),
       ] satisfies Layer[],
     [
+      activeToolId,
       echelonModel,
       coverageLayers,
       contestedSlotIds,
@@ -958,62 +965,23 @@ export function GisBoard({
     [],
   );
 
-  // Drop overlay handlers live on the <section> itself. The visual overlay div is
-  // `pointer-events-none` so it never blocks deck.gl pan/zoom; drag events still bubble
-  // to the section, which keeps drag-drop working without capturing normal pointer input.
-  const handleSectionDragOver = useCallback(
-    (event: DragEvent<HTMLElement>) => {
-      event.preventDefault();
-      event.dataTransfer.dropEffect = "copy";
-      const rect = event.currentTarget.getBoundingClientRect();
-      const coord = unprojectClientPoint(event.clientX, event.clientY, rect);
-      if (!coord) {
-        setDropPreviewSlotId(null);
-        return;
-      }
-      const slot = screenPointToSlot({
-        lon: coord[0],
-        lat: coord[1],
-        activeLayerId: selectedLayerId as DefenseLayerId,
-        slots: echelonModel.slots,
-      });
-      setDropPreviewSlotId(slot?.id ?? null);
-    },
-    [unprojectClientPoint, selectedLayerId, echelonModel.slots],
-  );
+  const dropAssetAtPoint = useCallback((groupId: string, clientX: number, clientY: number, rect: DOMRect) => {
+    const coord = unprojectClientPoint(clientX, clientY, rect);
+    if (!coord) return;
+    onDropAsset({ groupId, layerId: selectedLayerId as DefenseLayerId, mapRef: { lon: coord[0], lat: coord[1] } });
+  }, [unprojectClientPoint, selectedLayerId, onDropAsset]);
 
-  const handleSectionDragLeave = useCallback(() => setDropPreviewSlotId(null), []);
-
-  const handleSectionDrop = useCallback(
-    (event: DragEvent<HTMLElement>) => {
-      event.preventDefault();
-      const groupId = event.dataTransfer.getData("application/x-fortis-group");
-      setDropPreviewSlotId(null);
-      if (!groupId) return;
-      const rect = event.currentTarget.getBoundingClientRect();
-      const coord = unprojectClientPoint(event.clientX, event.clientY, rect);
-      if (!coord) return;
-      const slot = screenPointToSlot({
-        lon: coord[0],
-        lat: coord[1],
-        activeLayerId: selectedLayerId as DefenseLayerId,
-        slots: echelonModel.slots,
-      });
-      if (!slot) return;
-      onDropAsset({
-        groupId,
-        layerId: selectedLayerId as DefenseLayerId,
-        slotId: slot.id,
-        mapRef: { lon: slot.position[0], lat: slot.position[1] },
-      });
-    },
-    [unprojectClientPoint, selectedLayerId, echelonModel.slots, onDropAsset],
-  );
+  const handleSectionDrop = useCallback((event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    const groupId = event.dataTransfer.getData("application/x-fortis-group");
+    if (groupId) dropAssetAtPoint(groupId, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
+  }, [dropAssetAtPoint]);
 
   const handleBaseMapSelect = useCallback(
     (sourceId: string) => {
       setIsBaseMapMenuOpen(false);
       setBaseMapWarning(null);
+      setMapNoticeState("expanded");
       setFailedOnlineSourceId(null);
       lastErroredBaseMapSourceIdRef.current = null;
       onSelectBaseMapSource(sourceId);
@@ -1026,6 +994,7 @@ export function GisBoard({
       const errorMessage = extractErrorMessage(event);
       if (lastErroredBaseMapSourceIdRef.current === currentBaseMapSource.id) return;
       lastErroredBaseMapSourceIdRef.current = currentBaseMapSource.id;
+      setMapNoticeState("expanded");
 
       if (currentBaseMapSource.isExternal && availableBaseMapSources.some(source => source.id === "internal-basemap")) {
         setBaseMapWarning("Не удалось загрузить онлайн-карту. Включена локальная карта.");
@@ -1063,8 +1032,12 @@ export function GisBoard({
     <section
       ref={boardRef}
       className={`relative h-[calc(100vh-11.5rem)] min-h-[540px] overflow-hidden rounded-lg border border-slate-200 ${className}`}
-      onDragOver={handleSectionDragOver}
-      onDragLeave={handleSectionDragLeave}
+      onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }}
+      onPointerUp={(event) => {
+        if (draggedAssetId && !(event.target as HTMLElement).closest("button,select,input,a")) {
+          dropAssetAtPoint(draggedAssetId, event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
+        }
+      }}
       onDrop={handleSectionDrop}
     >
       <DeckGL
@@ -1186,8 +1159,8 @@ export function GisBoard({
         })}
       </div>
 
-      <div className="absolute left-4 top-4 z-10 flex max-w-[min(42rem,calc(100%-2rem))] flex-wrap items-center gap-2">
-        <div className="min-w-[min(23rem,calc(100vw-6rem))] rounded-lg border border-white/60 bg-white/95 px-3 py-2 text-xs shadow-md shadow-slate-900/10 backdrop-blur">
+      <div className="absolute left-4 top-4 z-10 flex w-[calc(100%-5rem)] lg:w-auto lg:max-w-[min(42rem,calc(100%-2rem))] flex-wrap items-center gap-2">
+        <div className="w-full min-w-0 lg:min-w-[min(23rem,calc(100vw-6rem))] rounded-lg border border-white/60 bg-white/95 px-3 py-2 text-xs shadow-md shadow-slate-900/10 backdrop-blur">
           <select
             className="h-7 w-full rounded-md border border-transparent bg-transparent pr-6 text-sm font-semibold text-slate-950 outline-none transition hover:border-slate-200 hover:bg-white focus:border-blue-300 focus:bg-white"
             value={selectedFacility?.id ?? selectedFacilityId}
@@ -1205,13 +1178,18 @@ export function GisBoard({
           <p className="text-slate-500">
             {placementHint}
           </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button type="button" className="min-h-11 rounded-md border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50" disabled={!selectedFacility}
+              title="Центрировать объект · масштаб 1:100" onClick={() => selectedFacility && animateToViewState(buildProtectedObjectWorkingViewState(selectedFacility), placementFocusTransitionDurationMs)}>К объекту</button>
+            {onOpenModeling && <button type="button" className="min-h-11 rounded-md bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700" onClick={onOpenModeling}>К Монте-Карло</button>}
+          </div>
         </div>
       </div>
 
-      <div ref={baseMapMenuRef} className="absolute right-4 top-4 z-10 flex items-start gap-2">
+      <div ref={baseMapMenuRef} className="absolute right-4 top-4 z-10 flex flex-col items-end gap-2 lg:flex-row lg:items-start">
         <div className="relative">
           <button
-            className="flex min-h-11 min-w-11 items-center gap-2 rounded-lg border border-white/60 bg-white/95 px-3 text-sm font-semibold text-slate-700 shadow-md shadow-slate-900/10 backdrop-blur transition hover:border-blue-200 hover:text-blue-700"
+            className="flex min-h-11 min-w-11 items-center justify-center gap-2 max-lg:w-11 max-lg:px-1 max-lg:text-xs rounded-lg border border-white/60 bg-white/95 px-3 text-sm font-semibold text-slate-700 shadow-md shadow-slate-900/10 backdrop-blur transition hover:border-blue-200 hover:text-blue-700"
             type="button"
             onClick={() => setIsBaseMapMenuOpen((current) => !current)}
             aria-expanded={isBaseMapMenuOpen}
@@ -1220,7 +1198,7 @@ export function GisBoard({
             title="Источник карты"
           >
             <span>Карта</span>
-            <span className="text-xs text-slate-500">{currentBaseMapSource.title}</span>
+            <span className="hidden text-xs text-slate-500 lg:inline">{currentBaseMapSource.title}</span>
           </button>
           {isBaseMapMenuOpen ? (
             <div className="absolute right-0 mt-2 w-[min(26rem,calc(100vw-2rem))] max-h-[70vh] overflow-y-auto rounded-2xl border border-white/70 bg-white/97 p-3 shadow-2xl shadow-slate-900/20 backdrop-blur">
@@ -1321,11 +1299,18 @@ export function GisBoard({
 
       <div
         className="absolute bottom-5 left-4 z-10 rounded bg-white/90 px-3 py-1.5 text-[11px] text-slate-600 shadow"
+        data-map-longitude={viewState.longitude} data-map-latitude={viewState.latitude} data-map-zoom={viewState.zoom}
         aria-label={`Масштаб карты ${scaleBar.label}`}
       >
         <div className="mb-1 h-1 rounded-full bg-slate-800" style={{ width: `${scaleBar.widthPx}px` }} />
-        {scaleBar.label}
+        <span aria-label={`Масштаб 1:${scaleBar.denominator}`}>1:{scaleBar.denominator.toLocaleString("ru-RU")} · {scaleBar.label}</span>
       </div>
+
+      {currentBaseMapSource.id === "yandex-maps" && (
+        <a href="https://yandex.ru/maps/" target="_blank" rel="noreferrer" aria-label="Яндекс Карты" className="absolute right-0 bottom-24 z-10">
+          <Image src={withBasePath("/maps/yandex/logo.png")} alt="Яндекс" width={88} height={48} unoptimized />
+        </a>
+      )}
 
       {currentBaseMapSource.attribution ? (
         <div
@@ -1334,13 +1319,22 @@ export function GisBoard({
         />
       ) : null}
 
-      {baseMapWarning || isBundledMap ? (
-        <div role="alert" className="absolute left-1/2 top-20 z-10 w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-xs font-medium text-amber-900 shadow-lg">
-          {baseMapWarning}
-          {isBundledMap && <div>Локально сохранены районы 20×20 км вокруг «Завода Альфа» и «Тестового предприятия». За их пределами подложка недоступна.</div>}
-          <div className="mt-2 flex flex-wrap gap-x-4">
-            {failedOnlineSourceId && <button className="min-h-11 underline" onClick={() => handleBaseMapSelect(failedOnlineSourceId)}>Повторить загрузку онлайн-карты</button>}
-            {isBundledMap && <button className="min-h-11 underline" onClick={() => setInteractiveViewState({ ...viewStateRef.current, longitude: localRegion.center[0], latitude: localRegion.center[1], zoom: 12 })}>К локальному району</button>}
+      {(baseMapWarning || isBundledMap) && mapNoticeState !== "hidden" ? (
+        <div role="alert" aria-label="Уведомление о карте" className="absolute left-1/2 top-44 z-10 w-[min(32rem,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50/95 px-3 py-2 text-xs font-medium text-amber-900 shadow-lg lg:top-20">
+          <div className="flex items-center gap-2">
+            <strong className="min-w-0 flex-1">{isBundledMap ? "Локальная карта" : "Источник карты недоступен"}</strong>
+            <button type="button" className="flex h-11 w-11 shrink-0 items-center justify-center rounded hover:bg-amber-100" aria-label={mapNoticeState === "expanded" ? "Свернуть уведомление о карте" : "Развернуть уведомление о карте"} aria-expanded={mapNoticeState === "expanded"} aria-controls="map-notice-details" onClick={() => setMapNoticeState(current => current === "expanded" ? "collapsed" : "expanded")}>
+              {mapNoticeState === "expanded" ? <UpOutlined /> : <DownOutlined />}
+            </button>
+            <button type="button" className="flex h-11 w-11 shrink-0 items-center justify-center rounded hover:bg-amber-100" aria-label="Закрыть уведомление о карте" onClick={() => { setMapNoticeState("hidden"); baseMapMenuRef.current?.querySelector("button")?.focus(); }}><CloseOutlined /></button>
+          </div>
+          <div id="map-notice-details" hidden={mapNoticeState !== "expanded"}>
+            {baseMapWarning}
+            {isBundledMap && <div>Локально сохранены районы 20×20 км вокруг «Завода Альфа» и «Тестового предприятия». За их пределами подложка недоступна.</div>}
+            <div className="mt-2 flex flex-wrap gap-x-4">
+              {failedOnlineSourceId && <button className="min-h-11 underline" onClick={() => handleBaseMapSelect(failedOnlineSourceId)}>Повторить загрузку онлайн-карты</button>}
+              {isBundledMap && <button className="min-h-11 underline" onClick={() => setInteractiveViewState({ ...viewStateRef.current, longitude: localRegion.center[0], latitude: localRegion.center[1], zoom: 12 })}>К локальному району</button>}
+            </div>
           </div>
         </div>
       ) : null}
@@ -1351,22 +1345,6 @@ export function GisBoard({
         </div>
       ) : null}
 
-      {/*
-        Drop overlay. CHOICE: `pointer-events-none` + drag handlers live on the parent <section>
-        (not here). The alternative primary variant — an `absolute inset-0 z-20` div that owns the
-        handlers — sits above the deck canvas and would swallow pan/zoom pointer events whenever the
-        user is NOT dragging. Since drag events bubble to the section regardless, the handlers-on-section
-        variant keeps drag-drop working while guaranteeing the map controller stays usable. This div is
-        purely a visual drop indicator. Needs manual verification in Task 9 (drag from assets panel,
-        confirm snap to nearest slot + that normal map pan/zoom is unaffected).
-      */}
-      <div className="pointer-events-none absolute inset-0 z-20">
-        {dropPreviewSlotId ? (
-          <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-md border border-blue-300 bg-blue-600/90 px-3 py-1.5 text-xs font-semibold text-white shadow-lg">
-            Слот: {echelonModel.slots.find((slot) => slot.id === dropPreviewSlotId)?.label ?? dropPreviewSlotId}
-          </div>
-        ) : null}
-      </div>
     </section>
   );
 }
