@@ -1,11 +1,10 @@
 // Run: pnpm exec tsx src/modules/drone-defense/infra/backend-integration-contract.test.ts
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { buildAssetDocumentDownloadUrl, buildAssetDocumentsListUrl } from "@/modules/drone-defense/infra/asset-documents-api";
 import {
   compareBackendProjects,
   getBackendProjectCost,
-  getBackendProjectReport,
 } from "@/modules/defense-calculator/infra/backend-project-api";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -40,30 +39,16 @@ async function main() {
   );
 
   await getBackendProjectCost("proj-1", 7);
-  await getBackendProjectReport("proj-1", { hideCost: true });
   await compareBackendProjects({projectId:"proj-1",projectVersion:7}, {projectId:"proj-2",projectVersion:3}, "E");
 
   assert(String(calls[0]?.input) === "/api/v1/projects/cost?projectId=proj-1&projectVersion=7", "cost helper must call /projects/cost");
   assert(
-    String(calls[1]?.input) === "/api/v1/projects/report?id=proj-1&hideCost=true",
-    "report helper must call /projects/report with hideCost",
-  );
-  assert(
-    String(calls[2]?.input) === "/api/v1/projects/compare?projectIdA=proj-1&projectVersionA=7&projectIdB=proj-2&projectVersionB=3",
+    String(calls[1]?.input) === "/api/v1/projects/compare?projectIdA=proj-1&projectVersionA=7&projectIdB=proj-2&projectVersionB=3",
     "compare helper must pin both saved revisions",
   );
 
-  const proxySource = readFileSync("src/proxy.ts", "utf8");
-  assert(proxySource.includes('forwardBackendRequest("/auth/me"'), "workspace guard must validate actual identity");
-  assert(!proxySource.includes("authGuardEnabled"), "workspace identity must not be disabled by a flag");
-  assert(proxySource.includes("access-token"), "proxy must check access-token cookie");
-  assert(proxySource.includes("/prototype/:path*"), "proxy must still be able to guard /prototype when enabled");
-  assert(proxySource.includes("/calculator/:path*"), "proxy must still be able to guard /calculator when enabled");
-  assert(proxySource.includes("/login"), "proxy must redirect to login");
-
-  const loginSource = readFileSync("src/app/api/auth/login/route.ts", "utf8");
-  assert(readFileSync("src/shared/server/auth-cookie.ts", "utf8").includes("HttpOnly"), "login route must write HttpOnly cookie");
-  assert(!loginSource.includes("localStorage"), "login route must not use localStorage");
+  assert(!existsSync("src/proxy.ts"), "shared workspace must not restore the auth proxy");
+  assert(!existsSync("src/app/api/auth/login/route.ts"), "shared workspace has no login endpoint");
 
   const defenseStudioShellSource = readFileSync("src/modules/drone-defense/ui/defense-studio-shell.tsx", "utf8");
   assert(
