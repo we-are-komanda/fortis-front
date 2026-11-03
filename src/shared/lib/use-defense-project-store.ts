@@ -33,6 +33,8 @@ import { defenseAssetLibrary } from "@/shared/config/defense-asset-library";
 import { fetchAssetLibrary, type FetchAssetLibraryOptions } from "@/modules/drone-defense/infra/asset-library-api";
 import { fetchEnterprises, type FetchEnterprisesOptions } from "@/modules/drone-defense/infra/enterprise-api";
 import { businessContent, type SaveAttempt } from "./project-save-state";
+import { budgetMessage, projectBudgetCandidate } from "./budget-projection";
+import type { BudgetProjection } from "@/shared/types/finance";
 import { writeProjectDraft, removeProjectDraft, type ProjectDraft } from "./project-draft-storage";
 import type {
   Coordinates,
@@ -60,12 +62,15 @@ type DefenseProjectState = {
   businessRevision: number;
   savedProject: DefenseProject | null;
   saveAttempt: SaveAttempt | null;
+  budgetProjection: BudgetProjection | null;
+  budgetError: string | null;
   setSaveAttempt: (attempt: SaveAttempt | null) => void;
   draftStorageError: string | null;
   localDraftSaved: boolean;
   acceptServerProject: (project: DefenseProject) => void;
   recordSavedProject: (sent: DefenseProject, server: DefenseProject) => void;
   restoreVerifiedDraft: (record: ProjectDraft) => void;
+  discardLocalChanges: () => boolean;
   localDraftsEnabled: boolean;
   setLocalDraftsEnabled: (enabled: boolean) => void;
   setRuntimeMode: (mode: "workspace" | "demo") => void;
@@ -113,7 +118,7 @@ type DefenseProjectState = {
   ) => PlacementValidationResult;
   moveObject: (objectId: string, coordinates: Coordinates) => PlacementValidationResult;
   transferObjectToLayer: (objectId: string, layerId: string) => PlacementValidationResult;
-  updatePlacedObject: (objectId: string, patch: Partial<PlacedDefenseObject>) => void;
+  updatePlacedObject: (objectId: string, patch: Partial<PlacedDefenseObject>) => boolean;
   setPlacedObjectMapVisibility: (objectId: string, isVisibleOnMap: boolean) => void;
   deletePlacedObject: (objectId: string) => void;
   duplicatePlacedObject: (objectId: string) => void;
@@ -128,7 +133,7 @@ type DefenseProjectState = {
     options?: FetchEnterprisesOptions & { loader?: () => Promise<ProtectedObjectOption[]> },
   ) => Promise<void>;
   upsertAssetInLibrary: (asset: DefenseAsset) => void;
-  removeAssetFromLibrary: (assetId: string) => { ok: true } | { ok: false; reason: "asset-in-use"; message: string };
+  removeAssetFromLibrary: (assetId: string) => { ok: true } | { ok: false; reason: "asset-in-use" | "budget-blocked"; message: string };
   clearProject: () => void;
   saveProjectToLocalStorage: () => void;
   restoreProjectFromLocalStorage: () => void;
@@ -192,18 +197,27 @@ function mergeProtectedObjectOptions(
 
 function applyProject(project: DefenseProject, set: (state: Partial<DefenseProjectState>) => void) {
   const state = useDefenseProjectStore.getState();
+  const budget = state.budgetProjection;
+  if (budget && budget.identity.projectId === project.projectId && budget.identity.projectVersion === project.version &&
+      state.savedProject?.projectId === project.projectId && state.savedProject.version === project.version && state.savedProject.enterpriseId === project.enterpriseId) {
+    try {
+      const candidate = projectBudgetCandidate(project, budget);
+      if (candidate.status === "blocked") { set({ budgetError: budgetMessage(candidate) }); return false; }
+    } catch { set({ budgetError: "Проверьте цены и количества. Изменение не применено." }); return false; }
+  }
   const savedProject = state.savedProject?.projectId === project.projectId && state.savedProject.enterpriseId === project.enterpriseId ? state.savedProject : null;
   const changed = businessContent(project) !== businessContent(state.project);
   set({ project, savedProject, businessRevision: state.businessRevision + (changed ? 1 : 0), hydrated: true,
     syncStatus: state.accessError ? "unverified" : savedProject && businessContent(project) === businessContent(savedProject) ? "saved" : "dirty",
-    budgetApplied: false, ...syncSelection(project) });
-  persist(project);
+    budgetApplied: false, budgetError: null, ...syncSelection(project) });
+  if (changed) persist(project);
+  return true;
 }
 
 export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => {
   const initialProject = createWorkspaceDefenseProject();
   return {
-    identityId: null,
+    identityId: "shared-workspace",
     accessError: null,
     project: initialProject,
     hydrated: false,
@@ -212,25 +226,44 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     businessRevision: 0,
     savedProject: null,
     saveAttempt: null,
+    budgetProjection: null,
+    budgetError: null,
     setSaveAttempt: (attempt) => {
       set({ saveAttempt: attempt });
       persist(get().project);
     },
     draftStorageError: null,
     localDraftSaved: false,
-    acceptServerProject: (project) => set({ project, savedProject: project, saveAttempt: null, businessRevision: 0,
+    acceptServerProject: (project) => set({ project, savedProject: project, saveAttempt: null, businessRevision: 0, budgetProjection: null, budgetError: null,
       hydrated: true, syncStatus: "saved", accessError: null, localDraftSaved: false, draftStorageError: null, ...syncSelection(project) }),
     recordSavedProject: (sent, server) => {
       const latest = get().project;
+      if (latest.projectId !== sent.projectId || latest.enterpriseId !== sent.enterpriseId) return;
       const project = { ...latest, projectId: server.projectId, enterpriseId: server.enterpriseId, version: server.version, updatedAt: server.updatedAt, source: "backend" as const };
       const baseline = { ...sent, projectId: server.projectId, enterpriseId: server.enterpriseId, version: server.version, updatedAt: server.updatedAt, source: "backend" as const };
-      set({ project, savedProject: baseline, saveAttempt: null, syncStatus: businessContent(project) === businessContent(baseline) ? "saved" : "dirty", hydrated: true, ...syncSelection(project) });
+      set({ project, savedProject: baseline, saveAttempt: null, budgetProjection: null, budgetError: null, syncStatus: businessContent(project) === businessContent(baseline) ? "saved" : "dirty", hydrated: true, ...syncSelection(project) });
       if (sent.projectId !== project.projectId && sent.enterpriseId && get().identityId) removeProjectDraft({ userId: get().identityId!, enterpriseId: sent.enterpriseId, projectId: sent.projectId }, get().localDraftsEnabled);
       persist(project);
     },
     restoreVerifiedDraft: (record) => {
-      set({ project: record.draft, savedProject: record.savedProject, saveAttempt: record.attempt?.kind === "update" ? { ...record.attempt, verificationRequired: true } : record.attempt ?? null,
+      const state = get();
+      const userId = state.runtimeMode === "demo" ? "demo" : state.identityId;
+      if (record.userId !== userId || state.accessError || !state.localDraftsEnabled ||
+        (record.projectId !== "current" && (state.project.projectId !== record.projectId || state.project.enterpriseId !== record.enterpriseId))) return;
+      set({ project: record.draft, savedProject: record.savedProject, saveAttempt: record.attempt && record.attempt.kind !== "create" ? { ...record.attempt, verificationRequired: true } : record.attempt ?? null,
         businessRevision: record.businessRevision, hydrated: true, syncStatus: "dirty", localDraftSaved: true, draftStorageError: null, accessError: null, ...syncSelection(record.draft) });
+    },
+    discardLocalChanges: () => {
+      const state = get();
+      const userId = state.runtimeMode === "demo" ? "demo" : state.identityId;
+      if (userId && state.project.enterpriseId) {
+        const result = removeProjectDraft({ userId, enterpriseId: state.project.enterpriseId, projectId: state.project.projectId }, state.localDraftsEnabled || state.localDraftSaved);
+        if (!result.ok) { set({ draftStorageError: result.error }); return false; }
+      }
+      const project = state.savedProject ?? createWorkspaceDefenseProject();
+      set({ project, saveAttempt: null, businessRevision: 0, localDraftSaved: false, draftStorageError: null,
+        syncStatus: state.accessError ? "unverified" : state.savedProject ? "saved" : "unverified", ...syncSelection(project) });
+      return true;
     },
     localDraftsEnabled: false,
     setLocalDraftsEnabled: (localDraftsEnabled) => set({ localDraftsEnabled }),
@@ -296,7 +329,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         activeLayerId: layer.id,
         updatedAt: new Date().toISOString(),
       };
-      applyProject(project, set);
+      if (!applyProject(project, set)) return { ok: false, validation: { isValid: false, level: "error", message: get().budgetError ?? "Изменение не применено." } };
       return { ok: true, layer };
     },
     updateLayerFromDraft: (layerId, draft) => {
@@ -355,7 +388,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         layers: get().project.layers.map((item) => (item.id === layerId ? updatedLayer : item)),
         updatedAt: new Date().toISOString(),
       });
-      applyProject(project, set);
+      if (!applyProject(project, set)) return { ok: false, validation: { isValid: false, level: "error", message: get().budgetError ?? "Изменение не применено." } };
       return { ok: true, layer: updatedLayer };
     },
     updateLayer: (layerId, patch) => {
@@ -397,12 +430,12 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         layers: get().project.layers.map((item) => (item.id === layerId ? updatedLayer : item)),
         updatedAt: new Date().toISOString(),
       });
-      applyProject(project, set);
+      if (!applyProject(project, set)) return { ok: false, validation: { isValid: false, level: "error", message: get().budgetError ?? "Изменение не применено." } };
       return { ok: true, layer: updatedLayer };
     },
     deleteLayer: (layerId) => {
       const result = deleteLayerFromProject(get().project, layerId);
-      if (result.ok) applyProject(result.project, set);
+      if (result.ok && !applyProject(result.project, set)) return { ok: false, reason: "budget-blocked", message: get().budgetError ?? "Изменение не применено." };
       return result;
     },
     moveLayerUp: (layerId) => applyProject(updateLayerOrder(get().project, layerId, "up"), set),
@@ -430,7 +463,6 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         layers: get().project.layers.map((layer) => ({ ...layer, isActive: layer.id === layerId })),
       };
       set({ project, ...syncSelection(project) });
-      persist(project);
     },
     setBaseObjectCenter: (center) => {
       const current = get().project.baseObject.center;
@@ -455,7 +487,6 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       const preview = get().assetLibraryPreview;
       set({ project, ...syncSelection(project), assetLibraryPreview: preview?.baseProject === before
         ? {...preview, baseProject: project} : preview });
-      persist(project);
     },
     selectObject: (objectId) => {
       const object = objectId ? get().project.placedObjects.find((item) => item.id === objectId) : null;
@@ -467,15 +498,13 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         layers: get().project.layers.map((layer) => ({ ...layer, isActive: object ? layer.id === object.layerId : layer.id === get().project.activeLayerId })),
       };
       set({ project, ...syncSelection(project) });
-      persist(project);
     },
     setAssetQuantity: (assetId, quantity) => applyProject(setAssetQuantityInProject(get().project, assetId, quantity), set),
     placeObject: (assetId, layerId, coordinates, patch) => {
       const validation = validateObjectPlacement(get().project, assetId, layerId, coordinates);
       if (!validation.isValid) return validation;
       const project = placeObjectInProject(get().project, assetId, layerId, coordinates, patch);
-      applyProject(project, set);
-      return validation;
+      return applyProject(project, set) ? validation : { isValid: false, level: "error", message: get().budgetError ?? "Изменение не применено." };
     },
     moveObject: (objectId, coordinates) => {
       const object = get().project.placedObjects.find((item) => item.id === objectId);
@@ -483,12 +512,11 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         ? validateObjectPlacement(get().project, object.assetId, object.layerId, coordinates)
         : { isValid: false, level: "error" as const, message: "Объект не найден" };
       if (!validation.isValid) return validation;
-      applyProject(movePlacedObjectInProject(get().project, objectId, coordinates), set);
-      return validation;
+      return applyProject(movePlacedObjectInProject(get().project, objectId, coordinates), set) ? validation : { isValid: false, level: "error", message: get().budgetError ?? "Изменение не применено." };
     },
     transferObjectToLayer: (objectId, layerId) => {
       const result = transferPlacedObjectToLayerInProject(get().project, objectId, layerId);
-      if (result.validation.isValid) applyProject(result.project, set);
+      if (result.validation.isValid && !applyProject(result.project, set)) return { isValid: false, level: "error", message: get().budgetError ?? "Изменение не применено." };
       return result.validation;
     },
     updatePlacedObject: (objectId, patch) => applyProject(updatePlacedObjectInProject(get().project, objectId, patch), set),
@@ -512,8 +540,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
       const lines = picks
         .filter((pick) => pick.included)
         .map((pick) => ({ assetId: pick.assetId, quantity: 1 }));
-      applyProject({ ...applyAssetQuantityDraftsToProject(get().project, lines), source: "custom" }, set);
-      set({ budgetApplied: true });
+      if (applyProject({ ...applyAssetQuantityDraftsToProject(get().project, lines), source: "custom" }, set)) set({ budgetApplied: true });
     },
     refreshAssetLibrary: async (options = {}) => {
       const generation = sessionGeneration();
@@ -538,9 +565,9 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
     },
     applyAssetLibraryPreview: () => {
       const preview = get().assetLibraryPreview;
+      if (!preview || preview.baseProject !== get().project || preview.generation !== sessionGeneration() || get().accessError) { set({ assetLibraryPreview: null }); return false; }
+      if (!applyProject({...preview.baseProject,assetLibrary:preview.assets,updatedAt:new Date().toISOString()},set)) return false;
       set({assetLibraryPreview: null});
-      if (!preview || preview.baseProject !== get().project || preview.generation !== sessionGeneration() || get().accessError) return false;
-      applyProject({...preview.baseProject,assetLibrary:preview.assets,updatedAt:new Date().toISOString()},set);
       return true;
     },
     discardAssetLibraryPreview: () => set({assetLibraryPreview:null}),
@@ -581,7 +608,7 @@ export const useDefenseProjectStore = create<DefenseProjectState>((set, get) => 
         selectedAssetId: get().project.selectedAssetId === assetId ? undefined : get().project.selectedAssetId,
         updatedAt: new Date().toISOString(),
       };
-      applyProject(project, set);
+      if (!applyProject(project, set)) return { ok: false, reason: "budget-blocked", message: get().budgetError ?? "Изменение не применено." };
       set({ assetLibraryError: null });
       return { ok: true };
     },

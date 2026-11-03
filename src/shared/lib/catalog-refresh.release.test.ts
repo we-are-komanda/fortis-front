@@ -68,7 +68,7 @@ test("legacy bundled demo imported into an enterprise retains demo while unrelat
  legacy.assetLibrary.push({...legacy.assetLibrary[0],id:"client-supplied-card",legacyItemId:undefined});
  const imported=importDefenseProjectJson(JSON.stringify(legacy));
  assert.ok(imported.assetLibrary.slice(0,-1).every(asset=>asset.provenance?.quality==="demo"));
- assert.equal(imported.assetLibrary.at(-1)?.provenance,null);
+ assert.equal("provenance" in imported.assetLibrary.at(-1)!, false, "an unrelated card must retain its absent source field");
  const supplied={...imported.assetLibrary[0].provenance!,quality:"confirmed" as const};
  legacy.assetLibrary[0]={...legacy.assetLibrary[0],provenance:supplied,fieldProvenance:{unitPriceMinor:supplied}};
  const edited=importDefenseProjectJson(JSON.stringify(legacy));

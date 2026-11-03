@@ -14,9 +14,8 @@ const sceneSource = readFileSync("src/modules/drone-defense/ui/scene.tsx", "utf8
 const dashboardSidebarSource = readFileSync("src/modules/dashboard/ui/sidebar.tsx", "utf8");
 
 assert(
-  shellSource.includes('navigate("drilldown")') &&
-    shellSource.includes("if (view) setView(view);"),
-  "Scenario modeling navigation must open a dedicated prototype state",
+  !shellSource.includes('onClick={() => setView("drilldown")}'),
+  "Teaching navigation must preserve the existing project map view",
 );
 assert(
   shellSource.includes("href=\"/prototype?view=scenario-modeling\""),
@@ -31,16 +30,18 @@ assert(
 assert(!shellSource.includes("href=\"/models\""), "3D navigation must not restore the legacy /models route");
 assert(
   prototypeSource.includes("<FacilityDrilldown"),
-  "Scenario modeling prototype state must render the restored 3D facility drilldown scene",
+  "Legacy 3D entry must retain the facility drilldown scene",
 );
 assert(
   prototypeSource.includes("searchParams.get(\"view\")") &&
-    prototypeSource.includes("requestedView === \"scenario-modeling\""),
-  "Prototype must render the scenario modeling scene from a direct /prototype?view=scenario-modeling entry",
+    prototypeSource.includes('searchParams.get("view") === "scenario-modeling"') &&
+    prototypeSource.includes("<ScenarioWorkspace") &&
+    prototypeSource.includes('canOpenCapability("scenarios", runtimeMode)'),
+  "Direct scenario entry must render the separate teaching workspace behind its runtime gate",
 );
 assert(
-  prototypeSource.includes("requestedView === \"3d\""),
-  "Prototype must keep the old /prototype?view=3d entry as a compatibility alias",
+  prototypeSource.includes('searchParams.get("view") === "3d"') && prototypeSource.includes("<FactoryBimViewer") && prototypeSource.includes('returnParams.set("view", "gis")'),
+  "Factory BIM must use its own 3D entry and return explicitly to GIS while preserving query parameters",
 );
 assert(
   !prototypeSource.includes("<Prototype3DPlaceholder />"),

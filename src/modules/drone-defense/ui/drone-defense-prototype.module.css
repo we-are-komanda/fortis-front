@@ -248,6 +248,14 @@
   background: var(--prototype-blue-soft);
 }
 
+.prototypeSidebarClose {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
 .prototypeButton:disabled,
 .prototypeButtonPrimary:disabled,
 .prototypeButtonGhost:disabled,
@@ -1686,8 +1694,8 @@
   left: 1rem;
   top: 5rem;
   z-index: 40;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.75rem;
+  height: 2.75rem;
   border-radius: var(--prototype-radius-card);
 }
 

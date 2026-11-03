@@ -1,16 +1,18 @@
 // Run: npx tsx src/shared/lib/use-defense-project-store.test.ts
 
 import {
-  projectStorageKey,
   useDefenseProjectStore,
 } from "@/shared/lib/use-defense-project-store";
-import { createDefaultDefenseProject, projectToCalculatorConfiguration } from "@/shared/lib/defense-project";
+import { createDefaultDefenseProject as createSeedProject, projectToCalculatorConfiguration } from "@/shared/lib/defense-project";
+import { draftStorageKey, readProjectDraft } from "./project-draft-storage";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
-const FORTIS_DEFENSE_PROJECT_STORAGE_KEY = projectStorageKey("test-user");
+const createDefaultDefenseProject = () => ({ ...createSeedProject(), enterpriseId: "test-enterprise" });
+const draftScope = { userId: "test-user", enterpriseId: "test-enterprise", projectId: createDefaultDefenseProject().projectId };
+const FORTIS_DEFENSE_PROJECT_STORAGE_KEY = draftStorageKey(draftScope);
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
   value: {
@@ -23,7 +25,7 @@ Object.defineProperty(globalThis, "localStorage", {
 });
 
 storage.clear();
-useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user", localDraftsEnabled: true }, true);
 useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 
 useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
@@ -66,11 +68,16 @@ useDefenseProjectStore.getState().duplicatePlacedObject(placed[0].id);
 assert(useDefenseProjectStore.getState().project.placedObjects.length === 2, "duplicatePlacedObject must add a second object");
 
 const saved = storage.get(FORTIS_DEFENSE_PROJECT_STORAGE_KEY);
-useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user", localDraftsEnabled: true }, true);
 if (saved) storage.set(FORTIS_DEFENSE_PROJECT_STORAGE_KEY, saved);
 useDefenseProjectStore.getState().restoreProjectFromLocalStorage();
 assert(useDefenseProjectStore.getState().hydrated, "restore must mark store hydrated");
-assert(useDefenseProjectStore.getState().project.placedObjects.length === 2, "restore must load placed objects");
+assert(useDefenseProjectStore.getState().project.placedObjects.length === 0, "hydration must not automatically restore local data");
+const recovered = readProjectDraft(draftScope, true);
+assert(recovered.ok && recovered.value, "scoped draft must remain readable for explicit recovery");
+useDefenseProjectStore.getState().restoreVerifiedDraft(recovered.value);
+assert(useDefenseProjectStore.getState().project.placedObjects.length === 2, "explicit recovery must load placed objects");
+assert(useDefenseProjectStore.getState().syncStatus === "dirty", "recovery must not claim a server save");
 
 useDefenseProjectStore.getState().deletePlacedObject(useDefenseProjectStore.getState().project.placedObjects[0].id);
 assert(useDefenseProjectStore.getState().project.placedObjects.length === 1, "deletePlacedObject must remove an object");
@@ -269,7 +276,7 @@ assert(
 
 // ── budgetApplied flag (item 7) ──────────────────────────────────────────────
 storage.clear();
-useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user", localDraftsEnabled: true }, true);
 useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 
 {
@@ -305,7 +312,7 @@ useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
   useDefenseProjectStore.getState().applyBudgetSelection([{ assetId: firstAssetId, included: true }]);
   assert(useDefenseProjectStore.getState().budgetApplied === true, "precondition: flag true before restore");
   useDefenseProjectStore.getState().saveProjectToLocalStorage();
-  useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+  useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user", localDraftsEnabled: true }, true);
   useDefenseProjectStore.getState().restoreProjectFromLocalStorage();
   assert(
     useDefenseProjectStore.getState().budgetApplied === false,
@@ -314,7 +321,7 @@ useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 }
 
 // Selection-only actions must NOT reset the flag.
-useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user", localDraftsEnabled: true }, true);
 useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 {
   const st = useDefenseProjectStore.getState();
@@ -334,7 +341,7 @@ console.log("budgetApplied flag: OK");
 async function runAssetLibraryRefreshContracts() {
   // ── asset library refresh (FRT-48) ─────────────────────────────────────────
   storage.clear();
-  useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+  useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user", localDraftsEnabled: true }, true);
   useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 
   const st = useDefenseProjectStore.getState();
@@ -402,7 +409,7 @@ async function runAssetLibraryRefreshContracts() {
 
 async function runProtectedObjectContracts() {
   storage.clear();
-  useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user" }, true);
+  useDefenseProjectStore.setState({ ...useDefenseProjectStore.getInitialState(), identityId: "test-user", localDraftsEnabled: true }, true);
   useDefenseProjectStore.getState().replaceProject(createDefaultDefenseProject());
 
   assert(useDefenseProjectStore.getState().protectedObjects.length === 0, "no synthetic enterprise before server load");

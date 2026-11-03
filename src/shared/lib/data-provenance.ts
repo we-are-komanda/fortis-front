@@ -26,9 +26,12 @@ export function preserveDemoAssetSources(asset: {
   legacyItemId?: string;
   provenance?: DataProvenance | null;
   fieldProvenance?: Record<string, DataProvenance>;
-}): { provenance: DataProvenance | null; fieldProvenance?: Record<string, DataProvenance> } {
+}): { provenance?: DataProvenance | null; fieldProvenance?: Record<string, DataProvenance> } {
   const seed = defenseAssetLibrary.find(item => item.id === asset.id || item.id === asset.legacyItemId);
-  if (!seed?.provenance) return {provenance: asset.provenance ?? null, fieldProvenance: asset.fieldProvenance};
+  if (!seed?.provenance) return {
+    ...("provenance" in asset ? { provenance: asset.provenance } : {}),
+    ...("fieldProvenance" in asset ? { fieldProvenance: asset.fieldProvenance } : {}),
+  };
   return {
     provenance: {...(asset.provenance ?? seed.provenance), quality: "demo"},
     fieldProvenance: asset.fieldProvenance && Object.fromEntries(Object.entries(asset.fieldProvenance)

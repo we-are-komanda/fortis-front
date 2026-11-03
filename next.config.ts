@@ -6,13 +6,15 @@ const frontendRoot = dirname(fileURLToPath(import.meta.url));
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH?.trim() || "";
 const isStaticExport = process.env.NEXT_STATIC_EXPORT === "true";
+const isDesktop = process.env.FORTIS_DESKTOP_BUILD === "true";
 const distDir = process.env.FORTIS_NEXT_DIST_DIR?.trim() || undefined;
 const nextConfig: NextConfig = {
   distDir,
   turbopack: {
-    root: frontendRoot,
+    root: isDesktop ? dirname(frontendRoot) : frontendRoot,
   },
-  output: isStaticExport ? "export" : undefined,
+  output: isDesktop ? "standalone" : isStaticExport ? "export" : undefined,
+  outputFileTracingRoot: isDesktop ? dirname(frontendRoot) : undefined,
   trailingSlash: true,
   skipTrailingSlashRedirect: true,
   images: {
@@ -22,6 +24,9 @@ const nextConfig: NextConfig = {
   assetPrefix: basePath || undefined,
   async headers() {
     return [
+      ...(isDesktop ? [{ source: "/:path*", headers: [
+        { key: "Content-Security-Policy", value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org https://tile.openstreetmap.org https://tile.opentopomap.org; font-src 'self' data:; connect-src 'self' blob: data: https://tiles.openfreemap.org https://tile.openstreetmap.org https://tile.opentopomap.org; worker-src 'self' blob:; object-src 'none'; frame-ancestors 'none'; base-uri 'self'" },
+      ] }] : []),
       {
         source: "/models/:path*",
         headers: [

@@ -9,14 +9,15 @@ import { VariantsModal } from "@/modules/drone-defense/ui/variants-modal";
 
 function useVariantMeta() {
   const { token } = theme.useToken();
-  const { activeVariantId, activeVariantName, saveStatus, overwriteActiveVariant } =
+  const { activeVariantId, activeVariantName, saveStatus, conflictState, overwriteActiveVariant } =
     useDefenseVariantsStore();
 
   const accessError = useDefenseProjectStore((state) => state.accessError);
   const syncStatus = useDefenseProjectStore((state) => state.syncStatus);
+  const localDraftSaved = useDefenseProjectStore((state) => state.localDraftSaved);
   const isDraft = !activeVariantId;
   const saving = saveStatus === "saving";
-  const label = accessError ? "Проект недоступен" : saveStatus === "error" ? "Ошибка сохранения" : syncStatus === "unverified" ? "Черновик (не подтверждён)" : isDraft || syncStatus === "dirty" ? "Есть несохранённые изменения" : activeVariantName;
+  const label = accessError ? "Проект недоступен" : saving ? "Сохраняется" : conflictState ? "Конфликт версий" : saveStatus === "error" ? "Не удалось сохранить" : syncStatus === "unverified" ? "Черновик (не подтверждён)" : isDraft || syncStatus === "dirty" ? (localDraftSaved ? "Черновик на этом устройстве — есть несохранённые изменения" : "Есть несохранённые изменения") : `Сохранено · ${activeVariantName ?? "Текущий вариант"}`;
   const dotColor = saveStatus === "error" ? token.colorError : isDraft || syncStatus !== "saved" ? token.colorWarning : token.colorSuccess;
 
   return {

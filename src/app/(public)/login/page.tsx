@@ -1,10 +1,5 @@
-import { Suspense } from "react";
-import { LoginPage } from "@/modules/auth/ui/login-page";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <Suspense fallback={null}>
-      <LoginPage />
-    </Suspense>
-  );
+  redirect("/workspace");
 }

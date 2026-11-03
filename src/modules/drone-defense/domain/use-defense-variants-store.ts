@@ -8,9 +8,14 @@ import {
   loadVariant as apiLoadVariant,
   prepareProjectSave,
   sendProjectSaveAttempt,
+  type VariantListQuery,
 } from "@/modules/drone-defense/infra/api-client";
 import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
-import { businessContent, classifySaveVerification, type SaveAttempt } from "@/shared/lib/project-save-state";
+import { businessContent, classifySaveVerification, savedProjectRef, type SaveAttempt } from "@/shared/lib/project-save-state";
+import { getBackendBudgetConfig } from "@/modules/defense-calculator/infra/backend-project-api";
+import { formatBudgetMinor } from "@/shared/lib/budget-projection";
+import { isRecord } from "@/shared/lib/api-client";
+import type { BudgetConfig } from "@/shared/types/finance";
 import { readProjectDraft, type ProjectDraft } from "@/shared/lib/project-draft-storage";
 import type { DefenseProject, VariantSummary } from "@/shared/types/defense-project";
 
@@ -22,6 +27,11 @@ type VariantsState = {
   activeVariantName: string | null;
   conflictState: { projectId: string; message: string } | null;
   listStatus: Status;
+  listQuery: VariantListQuery | null;
+  totalItems: number;
+  listError: string | null;
+  listForbidden: boolean;
+  workspaceCreateAttempt: SaveAttempt | null;
   saveStatus: "idle" | "saving" | "error";
   loadStatus: Status;
   error: string | null;
@@ -30,10 +40,11 @@ type VariantsState = {
   recoveryStatus: Status;
   recoveryError: string | null;
 
-  fetchVariants: () => Promise<void>;
-  saveAsNewVariant: (name: string) => Promise<void>;
+  fetchVariants: (query?: VariantListQuery | null) => Promise<void>;
+  saveAsNewVariant: (name: string, proposedProject?: DefenseProject) => Promise<VariantSummary | null>;
   overwriteActiveVariant: () => Promise<void>;
-  loadVariant: (id: string, signal?: AbortSignal) => Promise<void>;
+  updateBudget: (config?: BudgetConfig) => Promise<boolean>;
+  loadVariant: (id: string, signal?: AbortSignal) => Promise<DefenseProject | null>;
   deleteVariant: (id: string) => Promise<void>;
   checkRecoveryDraft: () => Promise<void>;
   clearRecoveryDraft: () => void;
@@ -46,6 +57,12 @@ function accessFailure(err: unknown, projectId: string) {
 }
 
 function message(err: unknown): string {
+  const body = (err as { body?: unknown })?.body;
+  const details = isRecord(body) && isRecord(body.error) && isRecord(body.error.details) ? body.error.details : null;
+  if (details && (details.projectedSpentMinor === null || typeof details.projectedSpentMinor === "string") &&
+      (details.projectedRemainingMinor === null || typeof details.projectedRemainingMinor === "string")) {
+    try { return `${err instanceof Error ? err.message : "Бюджет не позволяет сохранить изменение."} Расход: ${formatBudgetMinor(details.projectedSpentMinor)}. Остаток: ${formatBudgetMinor(details.projectedRemainingMinor)}.`; } catch { /* Keep the server's safe message if details are malformed. */ }
+  }
   return err instanceof Error ? err.message : "Операция не удалась";
 }
 
@@ -82,10 +99,13 @@ function withBackendContext(project: DefenseProject, summary: VariantSummary): D
 
 export function shouldLoadBackendProject(id: string) {
   const state = useDefenseProjectStore.getState();
+  const hasUnsaved = state.syncStatus === "dirty" || state.saveAttempt !== null || (state.savedProject !== null && businessContent(state.project) !== businessContent(state.savedProject));
+  if (state.hydrated && state.project.projectId === id && hasUnsaved) return false;
   return !state.hydrated || state.syncStatus === "unverified" || state.project.projectId !== id || state.project.source !== "backend";
 }
 
 let loadGeneration = 0;
+let listGeneration = 0;
 
 export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
   variants: [],
@@ -93,6 +113,11 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
   activeVariantName: null,
   conflictState: null,
   listStatus: "idle",
+  listQuery: null,
+  totalItems: 0,
+  listError: null,
+  listForbidden: false,
+  workspaceCreateAttempt: null,
   saveStatus: "idle",
   loadStatus: "idle",
   error: null,
@@ -101,16 +126,22 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
   recoveryStatus: "idle",
   recoveryError: null,
 
-  fetchVariants: async () => {
+  fetchVariants: async (query) => {
     const identityGeneration = sessionGeneration();
-    set({ listStatus: "loading", error: null });
+    const generation = ++listGeneration;
+    if (query === null) {
+      set({ variants: [], totalItems: 0, listQuery: null, listStatus: "idle", listError: null, listForbidden: false });
+      return;
+    }
+    const listQuery = query ?? get().listQuery ?? {};
+    set({ variants: [], totalItems: 0, listQuery, listStatus: "loading", listError: null, listForbidden: false });
     try {
-      const res = await apiListVariants();
-      if (identityGeneration !== sessionGeneration()) return;
-      set({ variants: res.items, listStatus: "idle" });
+      const res = await apiListVariants(listQuery);
+      if (identityGeneration !== sessionGeneration() || generation !== listGeneration) return;
+      set({ variants: res.items, totalItems: res.totalItems, listStatus: "idle" });
     } catch (err) {
-      if (identityGeneration !== sessionGeneration()) return;
-      set({ listStatus: "error", error: message(err) });
+      if (identityGeneration !== sessionGeneration() || generation !== listGeneration) return;
+      set({ listStatus: "error", listError: message(err), listForbidden: [403, 404].includes(statusCode(err) ?? 0) });
     }
   },
 
@@ -138,6 +169,7 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
         return;
       }
       const record = result.value;
+      useDefenseProjectStore.setState({ accessError: null });
       set({ recoveryDraft: record && businessContent(record.draft) !== businessContent(server) ? record : null, recoveryStatus: "idle", recoveryError: null });
     } catch (err) {
       if (identityGeneration !== sessionGeneration()) return;
@@ -147,38 +179,120 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
   },
   clearRecoveryDraft: () => set({ recoveryDraft: null, recoveryStatus: "idle", recoveryError: null }),
 
-  saveAsNewVariant: async (name) => {
+  saveAsNewVariant: async (name, proposedProject) => {
     const identityGeneration = sessionGeneration();
-    if (useDefenseProjectStore.getState().accessError) return;
-    const project = useDefenseProjectStore.getState().project;
-    if (get().saveStatus === "saving") return;
-    set({ saveStatus: "saving", error: null, requestId: null, conflictState: null });
     const projectState = useDefenseProjectStore.getState();
-    const pendingAttempt = projectState.saveAttempt;
-    const attempt = pendingAttempt?.kind === "create"
+    if (projectState.accessError && !proposedProject) return null;
+    if (projectState.saveAttempt?.kind === "budget") {
+      set({ error: "Сначала завершите или явно отмените сохранение бюджета текущего проекта." });
+      return null;
+    }
+    const startingProject = projectState.project;
+    const project = proposedProject ?? startingProject;
+    if (get().saveStatus === "saving") return null;
+    name = name.trim();
+    if (!name || [...name].length > 120) {
+      set({ saveStatus: "error", error: "Название должно содержать от 1 до 120 символов." });
+      return null;
+    }
+    if (!project.enterpriseId?.trim()) {
+      set({ saveStatus: "error", error: "Выберите доступное предприятие." });
+      return null;
+    }
+    set({ saveStatus: "saving", error: null, requestId: null, conflictState: null });
+    const pendingAttempt = proposedProject ? get().workspaceCreateAttempt : projectState.saveAttempt;
+    const attempt = pendingAttempt?.kind === "create" && (!proposedProject || (pendingAttempt.name === name && businessContent(pendingAttempt.project) === businessContent(project)))
       ? pendingAttempt
-      : prepareProjectSave("create", name, project, projectState.businessRevision);
-    projectState.setSaveAttempt(attempt);
+      : prepareProjectSave("create", name, project, projectState.businessRevision, proposedProject ? undefined : savedProjectRef(projectState.savedProject) ?? undefined);
+    if (proposedProject) set({ workspaceCreateAttempt: attempt });
+    else projectState.setSaveAttempt(attempt);
     try {
       const summary = await sendProjectSaveAttempt(attempt);
-      if (identityGeneration !== sessionGeneration()) return;
+      if (identityGeneration !== sessionGeneration()) return null;
       const latest = useDefenseProjectStore.getState().project;
-      if (latest.projectId !== attempt.project.projectId) { set({ saveStatus: "idle" }); return; }
-      useDefenseProjectStore.getState().recordSavedProject(attempt.project, withBackendContext(attempt.project, summary));
-      set({ saveStatus: "idle", requestId: null, activeVariantId: summary.projectId, activeVariantName: summary.name });
+      if (proposedProject ? latest !== startingProject : latest.projectId !== attempt.project.projectId) {
+        set({ saveStatus: "error", error: "Текущий проект изменён во время создания. Новый вариант сохранён; откройте его из списка явно." });
+        return null;
+      }
+      if (proposedProject) useDefenseProjectStore.getState().acceptServerProject(withBackendContext(attempt.project, summary));
+      else useDefenseProjectStore.getState().recordSavedProject(attempt.project, withBackendContext(attempt.project, summary));
+      const committedProject = useDefenseProjectStore.getState().project;
+      set({ saveStatus: "idle", workspaceCreateAttempt: proposedProject ? null : get().workspaceCreateAttempt, requestId: null, activeVariantId: summary.projectId, activeVariantName: summary.name });
       await get().fetchVariants();
+      if (identityGeneration !== sessionGeneration() || useDefenseProjectStore.getState().project !== committedProject) return null;
+      return summary;
     } catch (err) {
-      if (identityGeneration !== sessionGeneration()) return;
-      if (useDefenseProjectStore.getState().project.projectId !== attempt.project.projectId) { set({ saveStatus: "idle" }); return; }
-      accessFailure(err, attempt.project.projectId);
+      if (identityGeneration !== sessionGeneration()) return null;
+      if (!proposedProject && useDefenseProjectStore.getState().project.projectId !== attempt.project.projectId) { set({ saveStatus: "idle" }); return null; }
+      if (!proposedProject) accessFailure(err, attempt.project.projectId);
       const status = statusCode(err);
-      if (status !== undefined && status < 500 && ![401, 403, 404, 409].includes(status)) useDefenseProjectStore.getState().setSaveAttempt(null);
+      if (status !== undefined && status < 500 && ![401, 403, 404, 409].includes(status)) {
+        if (proposedProject) set({ workspaceCreateAttempt: null });
+        else useDefenseProjectStore.getState().setSaveAttempt(null);
+      }
       set({ saveStatus: "error", error: message(err), requestId: requestId(err),
         conflictState: status === 409 ? { projectId: attempt.project.projectId, message: message(err) } : null });
+      return null;
+    }
+  },
+
+  updateBudget: async (config) => {
+    const identityGeneration = sessionGeneration();
+    const state = useDefenseProjectStore.getState();
+    const saved = state.savedProject;
+    if (state.accessError || !savedProjectRef(saved) || !saved || saved.projectId !== state.project.projectId || saved.version !== state.project.version || get().saveStatus === "saving") return false;
+    const pending = state.saveAttempt;
+    if (pending && pending.kind !== "budget") {
+      set({ error: "Сначала завершите или явно отмените сохранение текущего проекта." });
+      return false;
+    }
+    if (!pending && !config) return false;
+    const attempt: SaveAttempt = pending ?? { ...prepareProjectSave("update", saved.projectName, saved, state.businessRevision), kind: "budget", body: JSON.stringify({ version: saved.version, ...config }) };
+    const requested = JSON.parse(attempt.body) as BudgetConfig;
+    set({ saveStatus: "saving", error: null, conflictState: null, requestId: null });
+    try {
+      if (attempt.verificationRequired) {
+        const server = await apiLoadVariant(attempt.project.projectId);
+        const budget = await getBackendBudgetConfig(server.projectId, server.version!);
+        if (identityGeneration !== sessionGeneration()) return false;
+        const latest = useDefenseProjectStore.getState();
+        if (latest.project.projectId !== attempt.project.projectId || latest.project.enterpriseId !== attempt.project.enterpriseId || latest.project.version !== attempt.project.version) { set({ saveStatus: "error", error: "Контекст проекта изменился; результат бюджета требует повторного открытия проекта." }); return false; }
+        if (server.projectId !== attempt.project.projectId || server.enterpriseId !== attempt.project.enterpriseId || businessContent(server) !== businessContent(attempt.project) || server.version! < attempt.project.version!) {
+          set({ saveStatus: "error", error: "Проект на сервере изменился. Откройте актуальную версию перед изменением бюджета.", conflictState: { projectId: attempt.project.projectId, message: "Версия изменилась" } }); return false;
+        }
+        if (server.version! > attempt.project.version!) {
+          if (budget.config.budgetMode !== requested.budgetMode || budget.config.budgetLimitMinor !== requested.budgetLimitMinor) {
+            set({ saveStatus: "error", error: "Бюджет на сервере изменился. Откройте актуальную версию.", conflictState: { projectId: server.projectId, message: "Бюджет изменился" } }); return false;
+          }
+          latest.recordSavedProject(attempt.project, server);
+          useDefenseProjectStore.setState({ budgetProjection: budget });
+          set({ saveStatus: "idle" });
+          return true;
+        }
+      }
+      useDefenseProjectStore.getState().setSaveAttempt({ ...attempt, verificationRequired: false });
+      const response = await sendProjectSaveAttempt(attempt);
+      if (identityGeneration !== sessionGeneration()) return false;
+      const latest = useDefenseProjectStore.getState();
+      if (latest.project.projectId !== attempt.project.projectId || latest.project.enterpriseId !== attempt.project.enterpriseId || latest.project.version !== attempt.project.version) { set({ saveStatus: "error", error: "Контекст проекта изменился во время сохранения бюджета." }); return false; }
+      latest.recordSavedProject(attempt.project, response.snapshot!.project);
+      useDefenseProjectStore.setState({ budgetProjection: response.budget! });
+      set({ saveStatus: "idle", requestId: null });
+      return true;
+    } catch (err) {
+      if (identityGeneration !== sessionGeneration()) return false;
+      const latest = useDefenseProjectStore.getState();
+      if (latest.project.projectId !== attempt.project.projectId || latest.project.enterpriseId !== attempt.project.enterpriseId) { set({ saveStatus: "idle" }); return false; }
+      accessFailure(err, attempt.project.projectId);
+      if (isAmbiguous(err)) latest.setSaveAttempt({ ...attempt, verificationRequired: true });
+      else if (![401, 403, 404].includes(statusCode(err) ?? 0)) latest.setSaveAttempt(null);
+      set({ saveStatus: "error", error: message(err), requestId: requestId(err), conflictState: statusCode(err) === 409 ? { projectId: attempt.project.projectId, message: message(err) } : null });
+      return false;
     }
   },
 
   overwriteActiveVariant: async () => {
+    if (useDefenseProjectStore.getState().saveAttempt?.kind === "budget") { await get().updateBudget(); return; }
     const identityGeneration = sessionGeneration();
     if (useDefenseProjectStore.getState().accessError) return;
     const { activeVariantId, activeVariantName } = get();
@@ -186,6 +300,15 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
     if (get().saveStatus === "saving") return;
     const projectState = useDefenseProjectStore.getState();
     const project = projectState.project;
+    if (project.projectId !== activeVariantId) return;
+    if (!project.enterpriseId?.trim()) {
+      set({ saveStatus: "error", error: "Предприятие проекта не подтверждено. Откройте доступный проект из рабочей зоны." });
+      return;
+    }
+    if (projectState.saveAttempt?.kind === "create") {
+      await get().saveAsNewVariant(projectState.saveAttempt.name);
+      return;
+    }
     if (!projectState.saveAttempt && projectState.syncStatus === "saved") return;
     set({ saveStatus: "saving", error: null, requestId: null, conflictState: null });
     let attempt: SaveAttempt;
@@ -194,7 +317,8 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
       try {
         const server = await apiLoadVariant(activeVariantId);
         if (identityGeneration !== sessionGeneration()) return;
-        const verification = classifySaveVerification(pendingAttempt.project, server);
+        if (useDefenseProjectStore.getState().project.projectId !== project.projectId || useDefenseProjectStore.getState().project.enterpriseId !== project.enterpriseId) { set({ saveStatus: "idle" }); return; }
+        const verification = classifySaveVerification(pendingAttempt.project, server, projectState.savedProject ?? pendingAttempt.project);
         if (verification === "saved") {
           projectState.recordSavedProject(pendingAttempt.project, server);
           set({ saveStatus: "idle", requestId: null, activeVariantName: server.projectName });
@@ -248,7 +372,8 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
       try {
         const server = await apiLoadVariant(attempt.project.projectId);
         if (identityGeneration !== sessionGeneration()) return;
-        const verification = classifySaveVerification(attempt.project, server);
+        if (useDefenseProjectStore.getState().project.projectId !== project.projectId || useDefenseProjectStore.getState().project.enterpriseId !== project.enterpriseId) { set({ saveStatus: "idle" }); return; }
+        const verification = classifySaveVerification(attempt.project, server, projectState.savedProject ?? attempt.project);
         if (verification === "saved") {
           useDefenseProjectStore.getState().recordSavedProject(attempt.project, server);
           set({ saveStatus: "idle", requestId: requestId(err), activeVariantName: get().activeVariantName ?? server.projectName });
@@ -275,10 +400,11 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
     set({ loadStatus: "loading", error: null });
     try {
       const project = await apiLoadVariant(id, signal);
-      if (identityGeneration !== sessionGeneration() || signal?.aborted || generation !== loadGeneration) return;
+      if (identityGeneration !== sessionGeneration() || signal?.aborted || generation !== loadGeneration) return null;
+      if (project.projectId !== id) throw new Error("Ответ сервера не соответствует выбранному проекту.");
       if (useDefenseProjectStore.getState().project !== startingProject) {
         set({ loadStatus: "error", error: "Проект изменён во время загрузки. Локальные изменения сохранены; повторите открытие явно." });
-        return;
+        return null;
       }
       const known = get().variants.find((v) => v.projectId === id);
       useDefenseProjectStore.getState().acceptServerProject({
@@ -293,11 +419,13 @@ export const useDefenseVariantsStore = create<VariantsState>((set, get) => ({
         activeVariantName: known?.name ?? project.projectName,
         conflictState: null,
       });
+      return project;
     } catch (err) {
-      if (identityGeneration !== sessionGeneration()) return;
-      if (signal?.aborted || generation !== loadGeneration) { if (generation === loadGeneration) set({ loadStatus: "idle" }); return; }
+      if (identityGeneration !== sessionGeneration()) return null;
+      if (signal?.aborted || generation !== loadGeneration) { if (generation === loadGeneration) set({ loadStatus: "idle" }); return null; }
       accessFailure(err, id);
       set({ loadStatus: "error", error: message(err) });
+      return null;
     }
   },
 

@@ -51,11 +51,13 @@ function resetStore(): void {
   fetchCalls.length = 0;
   useDefenseVariantsStore.setState(useDefenseVariantsStore.getInitialState(), true);
   useDefenseProjectStore.setState(useDefenseProjectStore.getInitialState(), true);
+  useDefenseProjectStore.setState({ project: { ...useDefenseProjectStore.getState().project, enterpriseId: "enterprise-1" } });
 }
 
 function summary(overrides: Partial<VariantSummary> = {}): VariantSummary {
   return {
     projectId: "A",
+    enterpriseId: "enterprise-1",
     name: "name-A",
     projectName: "proj-A",
     version: 1,
@@ -68,6 +70,7 @@ function minimalProject(id: string): DefenseProject {
   return {
     schemaVersion: 1,
     projectId: id,
+    enterpriseId: "enterprise-1",
     projectName: `proj-${id}`,
     version: 7,
     baseObject: { id: "o1", name: "Obj", center: { lat: 55.75, lng: 37.61 } },
@@ -160,8 +163,9 @@ async function main() {
   assert(useDefenseVariantsStore.getState().saveStatus === "error", "409 must keep saveStatus error");
   assert(useDefenseVariantsStore.getState().conflictState?.projectId === "D", "409 must expose conflict project id");
   assert(
-    useDefenseVariantsStore.getState().error?.includes("перезагруз"),
-    "409 must tell the user to reload the current version",
+    useDefenseVariantsStore.getState().error?.includes("актуальную версию") &&
+      useDefenseVariantsStore.getState().error?.includes("отдельным вариантом"),
+    "409 must offer the current server version or a separate variant",
   );
   console.log("overwriteActiveVariant conflict: OK");
 

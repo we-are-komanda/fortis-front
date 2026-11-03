@@ -1,0 +1,31 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><title>Проверка Meshy / Fortis</title>
+<style>body{margin:0;background:#e6e9ee;font:16px system-ui;color:#172336}header{padding:16px;display:flex;gap:16px;align-items:center}select,button{font:inherit;padding:10px}canvas{display:block;width:100%;height:70vh}.labels{display:flex;justify-content:space-around}#status{padding:16px}</style>
+<script type="importmap">{"imports":{"three":"/node_modules/three/build/three.module.js","three/addons/":"/node_modules/three/examples/jsm/"}}</script>
+<header><strong>Исходник / облегчённая модель</strong><select id="model">
+<option>M01-pump</option><option>M03-heat-exchanger</option><option>M04-cooling-tower</option><option>M07-scrubber</option><option>M16-tanker-truck</option>
+</select><button id="rotate">Следующий ракурс</button></header><div class="labels"><span>Meshy · исходная геометрия</span><span>Fortis · оптимизированная геометрия</span></div><canvas></canvas><p id="status">Загрузка…</p>
+<script type="module">
+import * as T from "three";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+const renderer = new T.WebGLRenderer({canvas:document.querySelector("canvas"),antialias:true,preserveDrawingBuffer:true});
+renderer.setPixelRatio(1);renderer.setScissorTest(true);
+const room=new RoomEnvironment(),pmrem=new T.PMREMGenerator(renderer),environment=pmrem.fromScene(room).texture;
+room.dispose();pmrem.dispose();
+const scenes=[new T.Scene(),new T.Scene()], cameras=scenes.map(()=>new T.PerspectiveCamera(35,1,.01,100));
+scenes.forEach(s=>{s.background=new T.Color("#dce2e8");s.environment=environment;s.add(new T.HemisphereLight(0xffffff,0x667788,2));const light=new T.DirectionalLight(0xffffff,2);light.position.set(-3,8,5);s.add(light)});
+let loaded=[],angle=0;
+function draw(){const canvas=renderer.domElement,w=canvas.clientWidth,h=canvas.clientHeight;renderer.setSize(w,h,false);scenes.forEach((s,i)=>{const c=cameras[i];c.aspect=w/2/h;c.position.set(6.5*Math.cos(angle),4.2,6.5*Math.sin(angle));c.lookAt(0,.8,0);c.updateProjectionMatrix();renderer.setViewport(i*w/2,0,w/2,h);renderer.setScissor(i*w/2,0,w/2,h);renderer.render(s,c)})}
+async function load(){
+ document.querySelector("#status").textContent="Загрузка…";window.reviewReady=false;
+ for(const [i,o]of loaded.entries()){scenes[i].remove(o);o.traverse(m=>{if(m.isMesh){m.geometry.dispose();for(const v of Object.values(m.material))if(v?.isTexture)v.dispose();m.material.dispose()}})}
+ const id=document.querySelector("#model").value;
+ loaded=await Promise.all([`/assets/chemical-pilot-2026-10-20/models/${id}/${id}-source.glb`,`/public/models/chemical-pilot-v1/${id}.glb`].map(url=>new GLTFLoader().loadAsync(url).then(g=>g.scene)));
+ loaded.forEach((o,i)=>{const box=new T.Box3().setFromObject(o),size=box.getSize(new T.Vector3()),center=box.getCenter(new T.Vector3()),scale=3/Math.max(size.x,size.y,size.z);o.scale.setScalar(scale);o.position.set(-center.x*scale,-box.min.y*scale,-center.z*scale);scenes[i].add(o)});
+ angle=2.3;draw();document.querySelector("#status").textContent=id+" · ракурс 1";window.reviewReady=true;
+}
+document.querySelector("#model").onchange=load;
+document.querySelector("#rotate").onclick=()=>{angle+=Math.PI/2;draw();document.querySelector("#status").textContent=document.querySelector("#model").value+" · ракурс "+angle.toFixed(2)};
+window.onresize=draw;
+load().catch(e=>{document.querySelector("#status").textContent=e.message;throw e});
+</script></html>

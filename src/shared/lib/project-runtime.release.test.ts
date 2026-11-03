@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { useDefenseProjectStore as projects, projectStorageKey } from "./use-defense-project-store";
 import { useDefenseVariantsStore as variants } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { createDefaultDefenseProject, exportDefenseProjectJson, importDefenseProjectJson } from "./defense-project";
+import { writeProjectDraft } from "./project-draft-storage";
 import * as projectFunctions from "./defense-project";
 import * as variantFunctions from "@/modules/drone-defense/domain/use-defense-variants-store";
 
@@ -23,47 +24,72 @@ test("empty enterprises stays empty instead of adding a local object", async () 
   assert.deepEqual(projects.getState().protectedObjects, []);
 });
 test("failed load and save preserve current project; no automatic retry after any error", async () => {
-  let status = 503; let writes = 0;
-  const server = createServer((req, res) => { if (req.method === "PUT") writes++; res.writeHead(status); res.end("synthetic error"); });
+  let status = 503; let writes = 0; let reads = 0;
+  const server = createServer((req, res) => { if (req.method === "PUT") writes++; else reads++; res.writeHead(status); res.end("synthetic error"); });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (input, init) => originalFetch(typeof input === "string" && input.startsWith("/") ? base + input : input, init);
-  const project = { ...createDefaultDefenseProject(), source: "backend" as const, projectId: "synthetic", version: 3 };
+  const project = { ...createDefaultDefenseProject(), source: "backend" as const, projectId: "synthetic", enterpriseId: "synthetic-enterprise", version: 3 };
   projects.setState({ project }); variants.setState({ activeVariantId: project.projectId });
   try {
     await variants.getState().loadVariant("another-project");
     assert.equal(projects.getState().project, project);
     assert.equal(variants.getState().loadStatus, "error");
     for (status of [409, 500, 502, 504]) {
+      projects.setState({ ...projects.getInitialState(), project, hydrated: true, syncStatus: "dirty" }, true);
+      variants.setState({ ...variants.getInitialState(), activeVariantId: project.projectId }, true);
       const before = writes;
       await variants.getState().overwriteActiveVariant();
       assert.equal(projects.getState().project, project);
       assert.equal(variants.getState().saveStatus, "error");
       await new Promise((resolve) => setTimeout(resolve, 40));
       assert.equal(writes, before + 1, "manual save must not schedule retries");
+      if (status >= 500) {
+        assert.equal(projects.getState().saveAttempt?.verificationRequired, true);
+        const beforeReads = reads;
+        await variants.getState().overwriteActiveVariant();
+        assert.equal(reads, beforeReads + 1, "manual retry must first verify the ambiguous attempt");
+        assert.equal(writes, before + 1, "failed verification must not permit another write");
+        assert.equal(projects.getState().project, project);
+      }
     }
   } finally {
     globalThis.fetch = originalFetch;
     server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
-test("recovery does not overwrite an open project and is not server verification", () => {
+test("recovery ignores legacy keys and changes an open project only after authorized explicit restoration", async () => {
   const data = new Map<string, string>();
   const storage = globalThis.localStorage;
+  const originalFetch = globalThis.fetch;
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => data.set(key, value) } });
   try {
-    const project = { ...createDefaultDefenseProject(), source: "backend" as const, version: 3 };
+    const project = { ...createDefaultDefenseProject(), source: "backend" as const, projectId: "P", enterpriseId: "E", version: 3 };
     data.set(projectStorageKey("recovery-owner"), exportDefenseProjectJson(project));
-    projects.setState({ identityId: "recovery-owner", project: projectFunctions.createWorkspaceDefenseProject(), hydrated: false });
+    const empty = projectFunctions.createWorkspaceDefenseProject();
+    projects.setState({ ...projects.getInitialState(), identityId: "recovery-owner", project: empty, localDraftsEnabled: true }, true);
+    variants.setState(variants.getInitialState(), true);
     projects.getState().restoreProjectFromLocalStorage();
     assert.equal(projects.getState().syncStatus, "unverified");
-    assert.equal(projects.getState().project.source, "backend");
+    assert.equal(projects.getState().project, empty, "a legacy owner key is not authority to restore");
+    assert.equal(writeProjectDraft({ schemaVersion: 1, userId: "recovery-owner", enterpriseId: "E", projectId: "P", draft: { ...project, projectName: "local changes" }, savedProject: project, businessRevision: 1, savedAt: "2026-09-20T00:00:00Z" }, true).ok, true);
     const opened = { ...project, projectName: "already open" };
-    projects.getState().replaceProject(opened);
+    projects.getState().acceptServerProject(opened);
+    variants.setState({ activeVariantId: "P" });
     projects.getState().restoreProjectFromLocalStorage();
     assert.equal(projects.getState().project, opened);
-  } finally { Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage }); }
+    let reads = 0;
+    globalThis.fetch = async (input) => { assert.equal(input, "/api/defense/projects/P"); reads++; return Response.json(opened); };
+    await variants.getState().checkRecoveryDraft();
+    assert.equal(reads, 1);
+    assert.equal(projects.getState().project, opened, "checking recovery cannot replace the open project");
+    const record = variants.getState().recoveryDraft;
+    assert.ok(record);
+    projects.getState().restoreVerifiedDraft(record);
+    assert.equal(projects.getState().project.projectName, "local changes");
+    assert.equal(projects.getState().syncStatus, "dirty", "restored local changes are never server saved");
+  } finally { globalThis.fetch = originalFetch; Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage }); }
 });
 
 test("recovery preserves empty catalogs and user asset values without bundled expansion", () => {
@@ -81,10 +107,13 @@ test("workspace creation is empty; remount does not reload a hydrated dirty proj
   const project = projectFunctions.createWorkspaceDefenseProject();
   assert.deepEqual(project.assetLibrary, []); assert.deepEqual(project.layers, []);
   assert.equal(typeof variantFunctions.shouldLoadBackendProject, "function");
-  projects.setState({ project: { ...project, projectId: "open", source: "backend" }, hydrated: true, syncStatus: "dirty" });
+  const saved = { ...project, projectId: "open", source: "backend" as const };
+  projects.setState({ ...projects.getInitialState(), project: { ...saved, projectName: "unsaved changes" }, savedProject: saved, hydrated: true, syncStatus: "dirty" }, true);
   assert.equal(variantFunctions.shouldLoadBackendProject("open"), false);
   assert.equal(variantFunctions.shouldLoadBackendProject("other"), true);
   projects.setState({ syncStatus: "unverified" });
+  assert.equal(variantFunctions.shouldLoadBackendProject("open"), false, "lost access cannot turn unsaved content into an automatic reload");
+  projects.setState({ project: saved });
   assert.equal(variantFunctions.shouldLoadBackendProject("open"), true);
 });
 

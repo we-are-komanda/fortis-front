@@ -5,7 +5,7 @@ import { once } from "node:events";
 import { createWorkspaceDefenseProject } from "@/shared/lib/defense-project";
 
 const savedEnv = { ...process.env };
-const project = { ...createWorkspaceDefenseProject(), projectId: "project-a", version: 7 };
+const project = { ...createWorkspaceDefenseProject(), projectId: "project-a", enterpriseId: "enterprise-a", version: 7 };
 let lastRequest = { url: "", key: "", body: "" };
 const server = createServer(async (req, res) => {
   let body = "";

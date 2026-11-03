@@ -1,5 +1,5 @@
-import { ProjectWorkspacePage } from "@/modules/workspace/ui/project-workspace-page";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <ProjectWorkspacePage />;
+  redirect("/prototype?view=scenario-modeling");
 }

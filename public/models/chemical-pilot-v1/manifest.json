@@ -1,0 +1,112 @@
+[
+  {
+    "id": "M01-pump",
+    "sourceTriangles": 1438432,
+    "triangles": 119990,
+    "bytes": 14410228,
+    "dimensionsM": [
+      3,
+      1.486,
+      0.995
+    ],
+    "axisOrder": "X,Y-up,Z",
+    "scale": 1.5767656573451738,
+    "simplificationError": 0.0005458895466290414,
+    "sha256": "84d18a420879a9c84d4964574279f5cfeb0f59109d2b722dfc2105bea14a0de8",
+    "sourceSha256": "d3015fef0751f9329ab53a984403b4070d1b0dabc7c90968ff15f2f467f71e64",
+    "textureSha256": [
+      "d06d4775e320d4b0f42517fc773b64125667778f719de8d552aface1926eb713",
+      "b76bd546470ad2b572f2269cfc759da2c4a46a549d2c771e297b3010344fb4ae",
+      "3e586efebc50921351062da0c6be88081337c92813f429a7896fa2dc20c98ee8"
+    ],
+    "texturesUnchanged": true
+  },
+  {
+    "id": "M03-heat-exchanger",
+    "sourceTriangles": 699188,
+    "triangles": 49998,
+    "bytes": 8273752,
+    "dimensionsM": [
+      7,
+      2.275,
+      1.607
+    ],
+    "axisOrder": "X,Y-up,Z",
+    "scale": 3.6821504116142747,
+    "simplificationError": 0.0005319827469065785,
+    "sha256": "19d0b0813a3c2b853d62e7454181b61da6cdf9e669fc27ab49859493c731e340",
+    "sourceSha256": "5c77ed4590b7915933cecf64e569812c67d1d0f76d8e70792c8c7f3905070512",
+    "textureSha256": [
+      "4278e08743bded53544e1a5f3c4c29374bbe3332d5404682870d5112849a7d53",
+      "007294ccda249ed29b3035b0c36f5e4fb46586be30745e7be07bc205f2dbe2c5",
+      "b173923bac6c4f24d5e8945c3d9a4c3a97233aa176198b8c2351d98b1d878822"
+    ],
+    "texturesUnchanged": true
+  },
+  {
+    "id": "M04-cooling-tower",
+    "sourceTriangles": 2389354,
+    "triangles": 79982,
+    "bytes": 13147140,
+    "dimensionsM": [
+      7.996,
+      4.298,
+      4.463
+    ],
+    "axisOrder": "X,Y-up,Z",
+    "scale": 4.239598813827227,
+    "simplificationError": 0.001504784682765603,
+    "sha256": "14cad9ad381e99c47b9195952b7e402ed23a133262a1d686f9b262727b0662d5",
+    "sourceSha256": "2be8637f94cb6cf82ce213268fce5b362db75724f462ba3537b9ee08f3b266e3",
+    "textureSha256": [
+      "6fe942d7d8204a5dc3a1a79fb92cabe313cdb64d3fe9e1f3cbe2bf475ecc7f6f",
+      "fd02b4eab5b4694e739cc045a1f5f6b2163a334ab3b27cec45625fe235537632",
+      "c20676710b1558692b5c4549879c831a63640e8ea461d3571e090acfb945b172"
+    ],
+    "texturesUnchanged": true
+  },
+  {
+    "id": "M07-scrubber",
+    "sourceTriangles": 1492846,
+    "triangles": 60000,
+    "bytes": 9259548,
+    "dimensionsM": [
+      3.502,
+      9.999,
+      2.632
+    ],
+    "axisOrder": "X,Y-up,Z",
+    "scale": 5.251990562378676,
+    "simplificationError": 0.0009133804705925286,
+    "sha256": "7d271b2d9b47356533519391413fd8b0d00ba33af036f57292ab15f7078b3cbb",
+    "sourceSha256": "2edaa9ed193cb8b86695e945d5ecb66d3d5743036bc6a719297a066f6b9a9a6c",
+    "textureSha256": [
+      "08992745bbaa39bdc4a3f95b1859c0102b9644ce8287633dc7c454c08b25ac70",
+      "b071402eaf396d747af887456557ec45e9101e1835f92b34ceaf717f3af72593",
+      "13ffccebeb5ad2831a3fab8230f6424b2cac8e60e4ecbd70526fbbffa794a1af"
+    ],
+    "texturesUnchanged": true
+  },
+  {
+    "id": "M16-tanker-truck",
+    "sourceTriangles": 2067708,
+    "triangles": 79994,
+    "bytes": 12447076,
+    "dimensionsM": [
+      11.996,
+      3.309,
+      2.864
+    ],
+    "axisOrder": "X,Y-up,Z",
+    "scale": 6.310604741261766,
+    "simplificationError": 0.001006432226859033,
+    "sha256": "7e3bad6944dedfa8cba45045aa265bc419f0f6a2c894150a8fb44a36c1979791",
+    "sourceSha256": "347ab535904168e82006668c11a5b5c9aefcbfa7fbb968017f786205ac51039f",
+    "textureSha256": [
+      "2635e35f86284c42008fbbf8d904a331635ac37fd95c73bbbc2facee0f670f83",
+      "eee2793e3fbf2ad9e7046d727fe8a81204dfb80eaaa84b74bfe30df16038eb1a",
+      "cb568944c03c06695633f1c5a383793d08d8b598f5395c1e82289abfafa6615f"
+    ],
+    "texturesUnchanged": true
+  }
+]

@@ -46,21 +46,6 @@ const osmAttribution =
 const openTopoMapAttribution =
   'Map data: © <a href="https://openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors | DEM: <a href="http://viewfinderpanoramas.org" target="_blank" rel="noreferrer">SRTM</a>, <a href="https://sonny.4lima.de/" target="_blank" rel="noreferrer">Sonny</a> | Map style: © <a href="https://opentopomap.org" target="_blank" rel="noreferrer">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noreferrer">CC-BY-SA</a>)';
 
-const offlineFallbackStyle: StyleSpecification = {
-  version: 8,
-  name: "Fortis offline basemap",
-  sources: {},
-  layers: [
-    {
-      id: "fortis-offline-background",
-      type: "background",
-      paint: {
-        "background-color": "#dbe4ef",
-      },
-    },
-  ],
-};
-
 function parseBoolean(value: string | undefined, fallback: boolean) {
   if (!value) return fallback;
   if (value === "true") return true;
@@ -144,11 +129,12 @@ function buildInternalBaseMapSource(env: NodeJS.ProcessEnv): BaseMapSource {
 
   return {
     id: "internal-basemap",
-    title: "Internal basemap",
-    description: "Офлайн fallback-подложка Fortis для закрытого контура.",
+    title: "Локальная карта · 2 района",
+    description: "Два района по 20×20 км: Завод Альфа и Тестовое предприятие. Без интернета.",
     category: "internal",
     type: "local-style-json",
-    styleJson: offlineFallbackStyle,
+    url: "/maps/demo-region/style.json",
+    attribution: openFreeMapAttribution,
     enabled: true,
     isExternal: false,
     isSelfHostedReady: true,

@@ -40,14 +40,20 @@ export function readProjectDraft(scope: DraftScope, enabled: boolean): StorageRe
     if (savedProject && (savedProject.projectId !== scope.projectId || savedProject.enterpriseId !== scope.enterpriseId || savedProject.source !== "backend" || !Number.isSafeInteger(savedProject.version) || savedProject.version! < 1)) return failure();
     if (value.attempt) {
       const attempt = value.attempt;
-      if (!isRecord(attempt) || !["create", "update"].includes(String(attempt.kind)) || typeof attempt.body !== "string" || typeof attempt.name !== "string" || !attempt.name.trim() || attempt.name.length > 120 || typeof attempt.startedAt !== "string" || !Number.isFinite(Date.parse(attempt.startedAt)) || !Number.isSafeInteger(attempt.businessRevision) || attempt.businessRevision < 0 || attempt.businessRevision > value.businessRevision || (attempt.verificationRequired !== undefined && typeof attempt.verificationRequired !== "boolean") || (attempt.kind === "create" && (typeof attempt.idempotencyKey !== "string" || !attempt.idempotencyKey.trim() || attempt.idempotencyKey.length > 200))) return failure();
+      if (!isRecord(attempt) || !["create", "update", "budget"].includes(String(attempt.kind)) || typeof attempt.body !== "string" || typeof attempt.name !== "string" || !attempt.name.trim() || [...attempt.name.trim()].length > 120 || typeof attempt.startedAt !== "string" || !Number.isFinite(Date.parse(attempt.startedAt)) || !Number.isSafeInteger(attempt.businessRevision) || attempt.businessRevision < 0 || attempt.businessRevision > value.businessRevision || (attempt.verificationRequired !== undefined && typeof attempt.verificationRequired !== "boolean") || (attempt.kind === "create" && (typeof attempt.idempotencyKey !== "string" || !attempt.idempotencyKey.trim() || attempt.idempotencyKey.length > 200))) return failure();
       const sent = importDefenseProjectJson(JSON.stringify(attempt.project));
-      if (sent.projectId !== scope.projectId || sent.enterpriseId !== scope.enterpriseId || (attempt.kind === "update" && (!Number.isSafeInteger(sent.version) || sent.version! < 1))) return failure();
+      if (sent.projectId !== scope.projectId || sent.enterpriseId !== scope.enterpriseId || (attempt.kind !== "create" && (!Number.isSafeInteger(sent.version) || sent.version! < 1))) return failure();
       const body = JSON.parse(attempt.body) as unknown;
-      if (!isRecord(body) || body.name !== attempt.name || body.enterpriseId !== scope.enterpriseId || typeof body.projectJson !== "string") return failure();
-      const bodyProject = importDefenseProjectJson(body.projectJson);
-      if (bodyProject.projectId !== scope.projectId || bodyProject.enterpriseId !== scope.enterpriseId || businessContent(bodyProject) !== businessContent(sent)) return failure();
-      if (attempt.kind === "update" && body.version !== sent.version) return failure();
+      if (!isRecord(body)) return failure();
+      if (attempt.kind === "budget") {
+        if (body.version !== sent.version || !(body.budgetMode === "unlimited" ? body.budgetLimitMinor === null : body.budgetMode === "limited" && typeof body.budgetLimitMinor === "string" && /^(0|[1-9]\d*)$/.test(body.budgetLimitMinor))) return failure();
+      } else {
+        if (body.name !== attempt.name || body.enterpriseId !== scope.enterpriseId || typeof body.projectJson !== "string") return failure();
+        const bodyProject = importDefenseProjectJson(body.projectJson);
+        if (bodyProject.projectId !== scope.projectId || bodyProject.enterpriseId !== scope.enterpriseId || businessContent(bodyProject) !== businessContent(sent)) return failure();
+        if (attempt.kind === "update" && body.version !== sent.version) return failure();
+        if (body.budgetSource !== undefined && (!isRecord(body.budgetSource) || typeof body.budgetSource.projectId !== "string" || !body.budgetSource.projectId || !Number.isSafeInteger(body.budgetSource.projectVersion) || Number(body.budgetSource.projectVersion) < 1)) return failure();
+      }
     }
     return { ok: true, value: { ...value, draft, savedProject } };
   } catch { return failure(); }

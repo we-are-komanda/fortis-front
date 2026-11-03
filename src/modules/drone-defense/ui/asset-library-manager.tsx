@@ -29,9 +29,6 @@ import type {
 type AssetLibraryManagerProps = {
   assets: DefenseAsset[];
   enterpriseId?: string;
-  previewAssets?: DefenseAsset[] | null;
-  onApplyPreview: () => boolean;
-  onDiscardPreview: () => void;
   placedObjects: PlacedDefenseObject[];
   selectedAssetId?: string | null;
   loading: boolean;
@@ -71,7 +68,7 @@ const coverageTypeOptions: Array<{ value: DefenseAssetCoverageType; label: strin
 
 export function AssetLibraryManager({
   assets,
-  enterpriseId, previewAssets, onApplyPreview, onDiscardPreview,
+  enterpriseId,
   placedObjects,
   selectedAssetId,
   loading,
@@ -201,15 +198,7 @@ export function AssetLibraryManager({
       {localError ? <p className={`${styles.prototypeNoticeDanger} mt-2`}>{localError}</p> : null}
 
       {selectedAsset && <p className="mt-2 text-sm" data-testid="asset-provenance">{provenanceLabel(selectedAsset.fieldProvenance?.unitPriceMinor ?? selectedAsset.fieldProvenance?.pricePerUnitMln ?? selectedAsset.provenance)} · {assetPriceLabel(selectedAsset)}</p>}
-      {previewAssets && <section className="mt-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3" aria-label="Просмотр изменений каталога">
-        <h3 className="font-medium">Обновить данные проекта</h3>
-        <p className="text-sm">Изменения станут черновиком. Сохранённые версии и цены экземпляров сохранятся.</p>
-        {previewAssets.filter(asset=>JSON.stringify(asset)!==JSON.stringify(assets.find(item=>item.id===asset.id))).map(asset=>{
-          const before=assets.find(item=>item.id===asset.id);
-          return <div key={asset.id} className="border-t border-amber-200 pt-2 text-sm"><p>{before?.name ?? "Новая карточка"} → {asset.name}</p><p>{before ? assetPriceLabel(before) : "—"} → {assetPriceLabel(asset)}</p><p>{provenanceLabel(asset.provenance)}</p><details><summary className="min-h-11 cursor-pointer py-2">Изменённые поля карточки</summary><dl>{Object.keys(asset).filter(key=>JSON.stringify(asset[key as keyof DefenseAsset])!==JSON.stringify(before?.[key as keyof DefenseAsset])).map(key=><div key={key} className="my-2 break-words"><dt className="font-medium">{key}</dt><dd className="whitespace-pre-wrap break-all">{JSON.stringify(before?.[key as keyof DefenseAsset]) ?? "—"} → {JSON.stringify(asset[key as keyof DefenseAsset]) ?? "—"}</dd></div>)}</dl></details></div>;
-        })}
-        <div className="flex flex-wrap gap-2"><button type="button" className="min-h-11 rounded border px-3" onClick={()=>{if(!onApplyPreview())setLocalError("Проект изменился. Запросите обновление каталога ещё раз.");}}>Применить к черновику</button><button type="button" className="min-h-11 rounded border px-3" onClick={onDiscardPreview}>Отменить обновление</button></div>
-      </section>}
+
 
       {mode !== "closed" ? (
         <div className={`${styles.prototypeFormCard} mt-3 grid gap-2 bg-slate-50 p-2`}>

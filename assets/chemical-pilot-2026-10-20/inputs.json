@@ -1,0 +1,57 @@
+[
+  {
+    "id": "M01-pump",
+    "source": "/Users/rr/Downloads/Промышленный насосный агрегат на раме.png",
+    "reference": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/references/M01-pump.png",
+    "width": 1448,
+    "height": 1086,
+    "bit_depth": 8,
+    "png_color_type": 6,
+    "bytes": 1738224,
+    "sha256": "110aa3d3e7eea455a84ca179928c99378081fffeec39a8f57e011d7cc5aba36c"
+  },
+  {
+    "id": "M03-heat-exchanger",
+    "source": "/Users/rr/Downloads/Промышленный теплообменник на прозрачном фоне.png",
+    "reference": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/references/M03-heat-exchanger.png",
+    "width": 1672,
+    "height": 941,
+    "bit_depth": 8,
+    "png_color_type": 6,
+    "bytes": 1526332,
+    "sha256": "b16bf4ecc37ea5f742585b8ac8a9934fbff6d33b5f8ea6c1fb5911d023ee5d82"
+  },
+  {
+    "id": "M04-cooling-tower",
+    "source": "/Users/rr/Downloads/Промышленная градирня с вентилятором и платформой.png",
+    "reference": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/references/M04-cooling-tower.png",
+    "width": 1672,
+    "height": 941,
+    "bit_depth": 8,
+    "png_color_type": 6,
+    "bytes": 1694775,
+    "sha256": "194a2788ce8f5ebda4ca07a7038ce34c2fe2c5616ac7d25a45d50069c6e64df2"
+  },
+  {
+    "id": "M07-scrubber",
+    "source": "/Users/rr/Downloads/Промышленная скрубберная башня с лестницей.png",
+    "reference": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/references/M07-scrubber.png",
+    "width": 1024,
+    "height": 1536,
+    "bit_depth": 8,
+    "png_color_type": 6,
+    "bytes": 1591092,
+    "sha256": "985e2bd1064bd9840ff97ac4c8d69b85a819163e9d9bfff5788b01db927114c0"
+  },
+  {
+    "id": "M16-tanker-truck",
+    "source": "/Users/rr/Downloads/Синий тягач с цистерной из нержавеющей стали.png",
+    "reference": "/Users/rr/Documents/Fortis/frontend/assets/chemical-pilot-2026-10-20/references/M16-tanker-truck.png",
+    "width": 1672,
+    "height": 941,
+    "bit_depth": 8,
+    "png_color_type": 6,
+    "bytes": 1711298,
+    "sha256": "30abfd439acb58137d3059d599b672eb73e999b4ab34693e93d9ef5bbbf9558f"
+  }
+]

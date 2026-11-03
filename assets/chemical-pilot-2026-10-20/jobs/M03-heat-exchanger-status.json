@@ -1,0 +1,8 @@
+{
+  "outcome": "SUCCEEDED",
+  "task_id": "01a159b5-aff3-744c-87cd-24ef0281ae87",
+  "task_type": "image-to-3d",
+  "status": "SUCCEEDED",
+  "progress": 100,
+  "consumed_credits": 30
+}

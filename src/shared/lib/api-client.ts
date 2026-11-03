@@ -1,4 +1,4 @@
-import { sessionGeneration, setAuthenticatedIdentity } from "./session-state";
+import { sessionGeneration } from "./session-state";
 
 type ApiQueryValue = string | number | boolean | null | undefined;
 
@@ -28,7 +28,7 @@ export class FortisApiError extends Error {
     const outer = isRecord(body) ? body : undefined;
     const payload = isRecord(outer?.error) ? outer.error : outer;
     const codes: Record<number, string> = { 401: "unauthenticated", 403: "forbidden", 404: "not_found", 409: "version_conflict", 502: "backend_unreachable", 504: "backend_timeout" };
-    const messages: Record<number, string> = { 401: "Сессия отсутствует или истекла. Войдите снова.", 403: "Доступ запрещён.", 404: "Объект не найден.", 409: "Конфликт версии проекта.", 502: "Не удалось связаться с сервером.", 504: "Сервер не ответил вовремя." };
+    const messages: Record<number, string> = { 401: "Сервер отклонил запрос: требуется обновление конфигурации доступа.", 403: "Доступ запрещён.", 404: "Объект не найден.", 409: "Конфликт версии проекта.", 502: "Не удалось связаться с сервером.", 504: "Сервер не ответил вовремя." };
     super(typeof payload?.message === "string" ? payload.message : messages[response.status] ?? `Ошибка сервера (${response.status})`);
     this.name = "FortisApiError";
     this.status = response.status;
@@ -93,10 +93,6 @@ export async function readJson<T>(input: RequestInfo | URL, init?: RequestInit &
     body = text;
   }
   if (!response.ok) {
-    if (sessionBound && response.status === 401) {
-      setAuthenticatedIdentity(null);
-      if (typeof window !== "undefined") window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-    }
     if (sessionBound && typeof window !== "undefined" && [403, 404].includes(response.status)) window.dispatchEvent(new CustomEvent("fortis-access-error", { detail: { status: response.status, input: String(input) } }));
     throw new FortisApiError(response, body);
   }

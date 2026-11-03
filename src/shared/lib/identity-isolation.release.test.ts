@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { useDefenseProjectStore as projects } from "./use-defense-project-store";
 import { createWorkspaceDefenseProject, createDefaultDefenseProject } from "./defense-project";
+import { draftStorageKey } from "./project-draft-storage";
 
 test("workspace recovery cannot cross authenticated identities", () => {
   const data = new Map<string, string>();
@@ -17,9 +18,25 @@ test("workspace recovery cannot cross authenticated identities", () => {
   } finally { Object.defineProperty(globalThis, "localStorage", { configurable: true, value: storage }); }
 });
 
-import { setAuthenticatedIdentity, useSessionStore } from "./session-state";
+import { beginSessionVerification, setAuthenticatedIdentity, useSessionStore } from "./session-state";
 import { useDefenseVariantsStore as variants } from "@/modules/drone-defense/domain/use-defense-variants-store";
 import { useDefenseStudioStore as studio } from "@/modules/drone-defense/domain/use-defense-studio-store";
+
+test("successful authentication clears the previous identity and permits a fresh verification", () => {
+ setAuthenticatedIdentity("previous-user");
+ projects.getState().replaceProject({ ...createWorkspaceDefenseProject(), projectId: "private-previous", projectName: "Private previous project" });
+ variants.setState({ activeVariantId: "private-previous", activeVariantName: "Private previous project" });
+ const generation = useSessionStore.getState().generation;
+ beginSessionVerification();
+ assert.equal(useSessionStore.getState().userId, null);
+ assert.equal(useSessionStore.getState().invalid, false);
+ assert.equal(useSessionStore.getState().generation, generation + 1);
+ assert.notEqual(projects.getState().project.projectId, "private-previous");
+ assert.equal(variants.getState().activeVariantId, null);
+ setAuthenticatedIdentity(null);
+ beginSessionVerification();
+ assert.equal(useSessionStore.getState().invalid, false);
+});
 
 test("account switch resets all stores and drops an in-flight A list", async () => {
  const original = globalThis.fetch;
@@ -45,21 +62,21 @@ test("account switch resets all stores and drops an in-flight A list", async () 
  } finally { globalThis.fetch = original; }
 });
 
-test("401 invalidates identity; 403/404 block saving without retries or false saved state", async () => {
+test("401 preserves the draft; 403/404 block saving without retries or false saved state", async () => {
  const original = globalThis.fetch;
  try {
   for (const status of [403, 404, 401]) {
    setAuthenticatedIdentity("A");
-   const project = { ...createWorkspaceDefenseProject(), projectId: "private-A", source: "backend" as const };
-   projects.setState({ project, syncStatus: "saved", accessError: null });
-   variants.setState({ activeVariantId: "private-A" });
+   const project = { ...createWorkspaceDefenseProject(), projectId: "private-A", enterpriseId: "E", version: 7, source: "backend" as const };
+   projects.setState({ ...projects.getInitialState(), identityId: "A", project, syncStatus: "dirty", hydrated: true }, true);
+   variants.setState({ ...variants.getInitialState(), activeVariantId: "private-A" }, true);
    let writes = 0;
    globalThis.fetch = async () => { writes++; return new Response(null, { status }); };
    await variants.getState().overwriteActiveVariant();
    assert.notEqual(projects.getState().syncStatus, "saved");
    if (status === 401) {
-    assert.equal(useSessionStore.getState().userId, null);
-    assert.notEqual(projects.getState().project.projectId, "private-A");
+    assert.equal(useSessionStore.getState().userId, "A");
+    assert.equal(projects.getState().project, project);
    } else {
     assert.equal(projects.getState().project, project);
     assert.ok(projects.getState().accessError);
@@ -70,7 +87,7 @@ test("401 invalidates identity; 403/404 block saving without retries or false sa
  } finally { globalThis.fetch = original; }
 });
 
-import { logout } from "./identity";
+
 
 test("late project access failures cannot invalidate another current project", async (t) => {
  const original = globalThis.fetch;
@@ -78,11 +95,11 @@ test("late project access failures cannot invalidate another current project", a
   for (const operation of ["load", "overwrite", "create", "delete", "list"] as const) {
    await t.test(operation, async () => {
     setAuthenticatedIdentity("race-user");
-    projects.setState({ project: { ...createWorkspaceDefenseProject(), projectId: "old", source: "backend" }, syncStatus: "saved", accessError: null });
-    variants.setState({ activeVariantId: "old" });
+    projects.setState({ ...projects.getInitialState(), identityId: "race-user", project: { ...createWorkspaceDefenseProject(), projectId: "old", enterpriseId: "E", version: 7, source: "backend" }, syncStatus: "dirty", hydrated: true }, true);
+    variants.setState({ ...variants.getInitialState(), activeVariantId: "old" }, true);
     let finish!: (response: Response) => void;
     globalThis.fetch = (input) => String(input).endsWith("/new")
-     ? Promise.resolve(Response.json({ ...createWorkspaceDefenseProject(), projectId: "new", source: "backend" }))
+     ? Promise.resolve(Response.json({ ...createWorkspaceDefenseProject(), projectId: "new", enterpriseId: "E", version: 8, source: "backend" }))
      : new Promise<Response>((resolve) => { finish = resolve; });
     const store = variants.getState();
     const pending = operation === "load" ? store.loadVariant("old") : operation === "overwrite" ? store.overwriteActiveVariant() : operation === "create" ? store.saveAsNewVariant("copy") : operation === "delete" ? store.deleteVariant("old") : store.fetchVariants();
@@ -95,26 +112,4 @@ test("late project access failures cannot invalidate another current project", a
    });
   }
  } finally { globalThis.fetch = original; }
-});
-
-test("logout clears active memory but preserves only the owner recovery key", async () => {
- const original = globalThis.fetch; const storage = globalThis.localStorage;
- const data = new Map<string,string>();
- Object.defineProperty(globalThis,"localStorage",{configurable:true,value:{getItem:(key:string)=>data.get(key)??null,setItem:(key:string,value:string)=>data.set(key,value)}});
- try {
-  setAuthenticatedIdentity("A");
-  projects.getState().replaceProject({ ...createWorkspaceDefenseProject(), projectId: "private-A", source: "backend" });
-  globalThis.fetch = async (url, init) => { assert.equal(url,"/api/auth/logout"); assert.equal(init?.method,"POST"); return Response.json({status:"ok"}); };
-  await logout();
-  assert.equal(useSessionStore.getState().userId,null);
-  assert.notEqual(projects.getState().project.projectId,"private-A");
-  projects.getState().restoreProjectFromLocalStorage();
-  assert.notEqual(projects.getState().project.projectId,"private-A");
-  setAuthenticatedIdentity("B");projects.getState().restoreProjectFromLocalStorage();
-  assert.notEqual(projects.getState().project.projectId,"private-A");
-  setAuthenticatedIdentity("A");projects.getState().restoreProjectFromLocalStorage();
-  assert.equal(projects.getState().project.projectId,"private-A");
-  assert.equal(projects.getState().syncStatus,"unverified");
-  assert.equal(data.has("fortis-defense-project"),false);
- } finally {globalThis.fetch=original;Object.defineProperty(globalThis,"localStorage",{configurable:true,value:storage});}
 });

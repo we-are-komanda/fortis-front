@@ -3,7 +3,7 @@ import type { ProjectRef } from "@/shared/types/finance";
 
 export type SaveStatus = "loading" | "saved" | "dirty" | "saving" | "offline_draft" | "conflict" | "error";
 export type SaveAttempt = {
-  kind: "create" | "update";
+  kind: "create" | "update" | "budget";
   project: DefenseProject;
   name: string;
   body: string;
@@ -30,8 +30,8 @@ export function savedProjectRef(project: DefenseProject | null): ProjectRef | nu
   return project?.source === "backend" && project.projectId && Number.isSafeInteger(project.version) && project.version! > 0
     ? { projectId: project.projectId, projectVersion: project.version! } : null;
 }
-export function classifySaveVerification(sent: DefenseProject, current: DefenseProject): "saved" | "retry" | "conflict" {
+export function classifySaveVerification(sent: DefenseProject, current: DefenseProject, baseline: DefenseProject = sent): "saved" | "retry" | "conflict" {
   if (sent.projectId !== current.projectId || sent.enterpriseId !== current.enterpriseId || !savedProjectRef(current) || !sent.version) return "conflict";
-  if (current.version === sent.version) return "retry";
+  if (current.version === sent.version) return businessContent(current) === businessContent(baseline) ? "retry" : "conflict";
   return current.version! > sent.version && businessContent(current) === businessContent(sent) ? "saved" : "conflict";
 }

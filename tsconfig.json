@@ -32,5 +32,5 @@
     ".next/e2e-asset-library/types/**/*.ts",
     ".next/e2e-asset-library/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", ".fortis-desktop-stage", ".desktop-build", "src-tauri"]
 }

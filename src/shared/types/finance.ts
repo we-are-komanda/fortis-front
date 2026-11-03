@@ -1,6 +1,23 @@
 export type DataQuality = "confirmed" | "estimated" | "demo";
 export type Money = { currency: "RUB"; minor: string };
 export type ProjectRef = { projectId: string; projectVersion: number };
+export type BudgetConfig =
+  | { budgetMode: "unlimited"; budgetLimitMinor: null }
+  | { budgetMode: "limited"; budgetLimitMinor: string };
+export type BudgetProjection = {
+  identity: CalculationIdentity;
+  config: BudgetConfig;
+  spentMinor: string | null;
+  remainingMinor: string | null;
+  status: "within_limit" | "exceeded" | "unlimited" | "indeterminate";
+};
+export type BudgetCheckResponse = {
+  basedOn: ProjectRef;
+  status: "allowed" | "blocked";
+  reasonCode: "within_budget" | "unlimited" | "budget_exceeded" | "price_unknown" | "non_increasing_overage";
+  projectedSpentMinor: string | null;
+  projectedRemainingMinor: string | null;
+};
 export type CalculationIdentity = ProjectRef & {
   calculationVersion: string;
   inputDataVersions: Record<string, string>;
@@ -56,6 +73,8 @@ export type CostProjection = {
   unknownPriceObjectIds: string[];
   warnings: Issue[];
 };
+export type CompareSide = { identity: CalculationIdentity; name: string; updatedAt: string; cost: CostProjection; budget: BudgetProjection };
+export type CompareResult = { enterpriseId: string; a: CompareSide; b: CompareSide; differenceMinor: string | null; differencePercent: string | null; warnings: Issue[] };
 
 // A local preview has no authoritative calculation identity or server digest.
 export type DraftCostProjection = Omit<CostProjection, "identity"> & {

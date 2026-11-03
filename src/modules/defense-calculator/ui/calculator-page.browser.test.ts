@@ -128,12 +128,12 @@ for (const transition of ["version", "project"] as const) {
     try {
       await requestStarted;
       await setProject(page, next, "saved");
-      await expect(page.getByRole("heading", { level: 2 })).toHaveText(/225\s*000,00 ₽/);
+      await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveText(/225\s*000,00 ₽/);
       await expect(page.getByText(`Сохранённая версия ${next.version}`, { exact: true })).toBeVisible();
       release();
       await oldFinished;
       await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-      await expect(page.getByRole("heading", { level: 2 })).toHaveText(/225\s*000,00 ₽/);
+      await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveText(/225\s*000,00 ₽/);
       assert.deepEqual(errors, []);
     } finally { release(); await page.close(); }
   });
@@ -147,13 +147,13 @@ test("saved rows and totals come from one server projection; dirty edits replace
   let requests = 0;
   const { page, errors } = await pageFixture(local, "saved", async route => { requests++; await route.fulfill({ json: serverCost(savedProject) }); });
   try {
-    await expect(page.getByRole("heading", { level: 2 })).toHaveText(/475\s*000,00 ₽/);
+    await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveText(/475\s*000,00 ₽/);
     await expect(page.getByRole("heading", { name: "Saved row", exact: true })).toBeVisible();
     await expect(page.getByText("Local unsaved row", { exact: true })).toHaveCount(0);
     local.placedObjects[0].quantity = 4;
     await setProject(page, local, "dirty");
     await expect(page.getByText("Черновой расчёт — изменения не сохранены", { exact: true })).toBeVisible();
-    await expect(page.getByRole("heading", { level: 2 })).toHaveText(/725\s*000,00 ₽/);
+    await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveText(/725\s*000,00 ₽/);
     await expect(page.getByRole("heading", { name: "Local unsaved row", exact: true })).toBeVisible();
     await expect(page.getByText("Saved row", { exact: true })).toHaveCount(0);
     assert.equal(requests, 1);
@@ -168,12 +168,12 @@ test("unknown prices stay incomplete while explicit zero remains a known price",
   value.assetLibrary[1].unitPriceMinor = null;
   const { page, errors } = await pageFixture(value, "dirty");
   try {
-    await expect(page.getByRole("heading", { level: 2 })).toHaveText("Итог неполный");
+    await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveText("Итог неполный");
     await expect(page.getByText("Стоимость неизвестна", { exact: true })).toBeVisible();
     await expect(page.getByText(/Известная часть: 0,00 ₽/)).toBeVisible();
     value.placedObjects = value.placedObjects.slice(0, 1);
     await setProject(page, value, "dirty");
-    await expect(page.getByRole("heading", { level: 2 })).toHaveText("0,00 ₽");
+    await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveText("0,00 ₽");
     await expect(page.getByText("Стоимость неизвестна", { exact: true })).toHaveCount(0);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
@@ -184,7 +184,7 @@ test("empty project has zero total and no catalogue or recommended rows", { skip
   value.placedObjects = [];
   const { page, errors } = await pageFixture(value, "dirty");
   try {
-    await expect(page.getByRole("heading", { level: 2 })).toHaveText("0,00 ₽");
+    await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveText("0,00 ₽");
     await expect(page.getByText("0 позиций · 0 единиц", { exact: true })).toBeVisible();
     await expect(page.getByText(/В проекте пока нет размещённых объектов/)).toBeVisible();
     await expect(page.locator("article")).toHaveCount(0);
@@ -203,9 +203,9 @@ test("saved 503 shows a retryable error with request ID and never falls back to 
   try {
     await expect(page.getByRole("alert")).toContainText("synthetic-cost-unavailable");
     await expect(page.getByRole("region", { name: "Смета размещённых объектов" })).toHaveCount(0);
-    await expect(page.getByRole("heading", { level: 2 })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveCount(0);
     await page.getByRole("button", { name: "Повторить", exact: true }).click();
-    await expect(page.getByRole("heading", { level: 2 })).toHaveText(/475\s*000,00 ₽/);
+    await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveText(/475\s*000,00 ₽/);
     assert.equal(calls, 2);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
@@ -219,7 +219,7 @@ test("saved names and source labels render as escaped text", { skip: !enabled },
   value.assetLibrary[0].provenance = { sourceLabel: malicious, sourceDocumentId: null, sourceUrl: null, sourceDate: null, recordedAt: "2026-09-20T00:00:00Z", recordedBy: "synthetic", quality: "estimated", revision: "1" };
   const { page, errors } = await pageFixture(value, "saved", async route => { await route.fulfill({ json: serverCost(value) }); });
   try {
-    await expect(page.getByRole("heading", { level: 2 })).toHaveText(/475\s*000,00 ₽/);
+    await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveText(/475\s*000,00 ₽/);
     await expect(page.getByText(malicious, { exact: true })).toHaveCount(3);
     await expect(page.locator("img")).toHaveCount(0);
     assert.equal(await page.evaluate(() => "frc05Injected" in window), false);
@@ -234,7 +234,7 @@ test("malformed provenance fails as a protocol error before it reaches React ren
   const { page, errors } = await pageFixture(value, "saved", async route => { await route.fulfill({ json: payload }); });
   try {
     await expect(page.getByRole("alert")).toBeVisible();
-    await expect(page.getByRole("heading", { level: 2 })).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Смета размещённых объектов" }).getByRole("heading", { level: 2 })).toHaveCount(0);
     assert.deepEqual(errors, []);
   } finally { await page.close(); }
 });

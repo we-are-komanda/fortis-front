@@ -1,6 +1,7 @@
 import { readDataProvenance } from "@/shared/lib/data-provenance";
-import type { CostProjection } from "@/shared/types/finance";
-import { FortisProtocolError, isRecord, getApiJson, postApiJson, putApiJson } from "@/shared/lib/api-client";
+import type { CompareResult, CostProjection, ProjectRef } from "@/shared/types/finance";
+import { readBudgetProjection, readBudgetCheck } from "@/shared/lib/budget-projection";
+import { FortisProtocolError, isRecord, getApiJson, postApiJson } from "@/shared/lib/api-client";
 
 export type BackendEstimateLine = {
   objectId: string;
@@ -22,58 +23,33 @@ export type BackendCostCalculation = {
   byObject: BackendEstimateLine[];
 };
 
-export type BackendBudgetConfig = {
-  budgetMode: "limited" | "unlimited";
-  budgetAmountMln: number;
-  projectId: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type BackendBudgetCheck = {
-  fits: boolean;
-  remainingMln: number;
-  requiredMln: number;
-  budgetMode: "limited" | "unlimited";
-};
-
+// Map and inventory remain untrusted until the standalone report renderer validates them.
 export type BackendProjectReport = {
-  projectId: string;
-  projectName: string;
-  baseObject: unknown;
-  layers: unknown[];
-  placedObjects: unknown[];
-  estimate: BackendCostCalculation;
-  structuralProfile: unknown;
-  hideCost: boolean;
-};
+  reportId: string;
+  reportSchemaVersion: "report-v1";
+  identity: CostProjection["identity"];
+  generatedAt: string;
+  title: string;
+  enterprise: { id: string; name: string | null };
+  mapSnapshotData: unknown;
+  mapVisibility: { mode: "all" | "saved"; layerIds: string[]; objectIds: string[]; showCoverage: false };
+  objects: unknown[];
+  warnings: unknown[];
+  limitations: string[];
+} & ({ hideCost: true } | { hideCost: false; cost: CostProjection; budget: ReturnType<typeof readBudgetProjection>; sources: unknown[] });
 
-export type BackendProjectCompare = {
-  projectA: unknown;
-  projectB: unknown;
-  diff: {
-    objectCountDelta: number;
-    unitCountDelta: number;
-    echelonCountDelta: number;
-    categoryCountDelta: number;
-    conflictCountDelta: number;
-    coveredObjCountDelta: number;
-    costDeltaMln: number;
-    byEchelon: unknown[];
-  };
-};
-
-export function getBackendBudgetConfig(projectId: string) {
-  return getApiJson<BackendBudgetConfig>("/projects/budget", { query: { id: projectId } });
-}
-
-export function updateBackendBudgetConfig(projectId: string, body: Pick<BackendBudgetConfig, "budgetMode" | "budgetAmountMln">) {
-  return putApiJson<BackendBudgetConfig>("/projects/budget", { query: { id: projectId }, body });
+export async function getBackendBudgetConfig(projectId: string, projectVersion: number, signal?: AbortSignal) {
+  if (!Number.isSafeInteger(projectVersion) || projectVersion < 1) throw new FortisProtocolError();
+  return readBudgetProjection(await getApiJson<unknown>("/projects/budget", { query: { projectId, projectVersion }, signal }), projectId, projectVersion);
 }
 
 export async function getBackendProjectCost(projectId: string, projectVersion: number, signal?: AbortSignal): Promise<CostProjection> {
   if (!Number.isSafeInteger(projectVersion) || projectVersion < 1) throw new FortisProtocolError();
   const value = await getApiJson<unknown>("/projects/cost", { query: { projectId, projectVersion }, signal });
+  return readCostProjection(value, projectId, projectVersion);
+}
+
+function readCostProjection(value: unknown, projectId: string, projectVersion: number): CostProjection {
   if (!isRecord(value) || !isRecord(value.identity) || value.identity.projectId !== projectId || value.identity.projectVersion !== projectVersion ||
       typeof value.identity.calculationVersion !== "string" || !value.identity.calculationVersion ||
       typeof value.identity.snapshotDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.identity.snapshotDigest) ||
@@ -128,21 +104,73 @@ export async function getBackendProjectCost(projectId: string, projectVersion: n
   return value as CostProjection;
 }
 
-export function checkBackendProjectBudget(
+export async function checkBackendProjectBudget(
   projectId: string,
-  body: { assetId: string; quantity: number; echelonId: string },
+  body: { version: number; projectJson: string },
 ) {
-  return postApiJson<BackendBudgetCheck>("/projects/budget/check", { query: { id: projectId }, body });
+  return readBudgetCheck(await postApiJson<unknown>("/projects/budget/check", { query: { projectId }, body }), projectId, body.version);
 }
 
-export function getBackendProjectReport(projectId: string, options: { hideCost?: boolean } = {}) {
-  return getApiJson<BackendProjectReport>("/projects/report", {
-    query: { id: projectId, hideCost: options.hideCost },
+export async function getBackendProjectReport(projectId: string, options: { projectVersion: number; hideCost: boolean; mapView?: "all" | "saved" }) {
+  const { projectVersion, hideCost, mapView = "all" } = options;
+  if (!projectId.trim() || !Number.isSafeInteger(projectVersion) || projectVersion < 1 ||
+      typeof hideCost !== "boolean" || !["all", "saved"].includes(mapView)) throw new FortisProtocolError();
+  const value = await getApiJson<unknown>("/projects/report", {
+    query: { id: projectId, projectVersion, hideCost, mapView },
   });
+  if (!isRecord(value) || typeof value.reportId !== "string" || !value.reportId || value.reportSchemaVersion !== "report-v1" ||
+      !isRecord(value.identity) || value.identity.projectId !== projectId || value.identity.projectVersion !== projectVersion ||
+      typeof value.identity.calculationVersion !== "string" || !value.identity.calculationVersion ||
+      typeof value.identity.snapshotDigest !== "string" || !/^[a-f0-9]{64}$/.test(value.identity.snapshotDigest) ||
+      !isRecord(value.identity.inputDataVersions) || !Object.values(value.identity.inputDataVersions).every(v => typeof v === "string") ||
+      value.hideCost !== hideCost || typeof value.generatedAt !== "string" || !Number.isFinite(Date.parse(value.generatedAt)) ||
+      typeof value.title !== "string" || !isRecord(value.enterprise) || typeof value.enterprise.id !== "string" ||
+      !(value.enterprise.name === null || typeof value.enterprise.name === "string") ||
+      !isRecord(value.mapSnapshotData) || !isRecord(value.mapVisibility) || value.mapVisibility.mode !== mapView ||
+      value.mapVisibility.showCoverage !== false ||
+      ![value.mapVisibility.layerIds, value.mapVisibility.objectIds, value.limitations].every(v => Array.isArray(v) && v.every(x => typeof x === "string")) ||
+      !Array.isArray(value.objects) || !Array.isArray(value.warnings)) throw new FortisProtocolError();
+  if (hideCost) {
+    if (["cost", "budget", "sources", "estimate"].some(key => key in value)) throw new FortisProtocolError();
+  } else {
+    const cost = readCostProjection(value.cost, projectId, projectVersion);
+    const budget = readBudgetProjection(value.budget, projectId, projectVersion);
+    const identityKey = (v: CostProjection["identity"]) => JSON.stringify([
+      v.projectId, v.projectVersion, v.calculationVersion, v.snapshotDigest, Object.entries(v.inputDataVersions).sort(),
+    ]);
+    const expected = identityKey(value.identity as CostProjection["identity"]);
+    if (identityKey(cost.identity) !== expected || identityKey(budget.identity) !== expected ||
+        cost.totalMinor !== budget.spentMinor || !Array.isArray(value.sources)) throw new FortisProtocolError();
+    value.sources.forEach(readDataProvenance);
+  }
+  return value as BackendProjectReport;
 }
 
-export function compareBackendProjects(projectId1: string, projectId2: string) {
-  return getApiJson<BackendProjectCompare>("/projects/compare", {
-    query: { id1: projectId1, id2: projectId2 },
-  });
+export async function compareBackendProjects(a: ProjectRef, b: ProjectRef, enterpriseId: string, signal?: AbortSignal): Promise<CompareResult> {
+  if (![a,b].every(ref => typeof ref.projectId === "string" && ref.projectId.trim() && Number.isSafeInteger(ref.projectVersion) && ref.projectVersion > 0) ||
+      a.projectId === b.projectId && a.projectVersion === b.projectVersion || !enterpriseId.trim()) throw new FortisProtocolError();
+  const value = await getApiJson<unknown>("/projects/compare", { query: { projectIdA: a.projectId, projectVersionA: a.projectVersion, projectIdB: b.projectId, projectVersionB: b.projectVersion }, signal });
+  if (!isRecord(value) || value.enterpriseId !== enterpriseId || !Array.isArray(value.warnings)) throw new FortisProtocolError();
+  for (const [side,ref] of [[value.a,a],[value.b,b]] as const) {
+    if (!isRecord(side) || !isRecord(side.identity) || typeof side.name !== "string" || !side.name.trim() || typeof side.updatedAt !== "string" || !Number.isFinite(Date.parse(side.updatedAt))) throw new FortisProtocolError();
+    const cost = readCostProjection(side.cost, ref.projectId, ref.projectVersion);
+    const budget = readBudgetProjection(side.budget, ref.projectId, ref.projectVersion);
+    const identity = (v: unknown) => {
+      if (!isRecord(v) || !isRecord(v.inputDataVersions)) throw new FortisProtocolError();
+      return JSON.stringify([v.projectId,v.projectVersion,v.calculationVersion,v.snapshotDigest,Object.entries(v.inputDataVersions).sort(([x],[y]) => x.localeCompare(y))]);
+    };
+    if (identity(side.identity) !== identity(cost.identity) || identity(cost.identity) !== identity(budget.identity) || cost.totalMinor !== budget.spentMinor) throw new FortisProtocolError();
+  }
+  const result = value as CompareResult;
+  const totalA = result.a.cost.totalMinor, totalB = result.b.cost.totalMinor;
+  const difference = totalA === null || totalB === null ? null : BigInt(totalB) - BigInt(totalA);
+  let percent: string | null = null;
+  if (difference !== null && totalA !== null && BigInt(totalA) > BigInt(0)) {
+    const numerator = (difference < BigInt(0) ? -difference : difference) * BigInt(10000), denominator = BigInt(totalA);
+    const rounded = numerator / denominator + (numerator % denominator * BigInt(2) >= denominator ? BigInt(1) : BigInt(0));
+    percent = `${difference < BigInt(0) && rounded !== BigInt(0) ? "-" : ""}${rounded / BigInt(100)}.${String(rounded % BigInt(100)).padStart(2,"0")}`;
+  }
+  if (result.differenceMinor !== (difference === null ? null : String(difference)) || result.differencePercent !== percent ||
+      !result.warnings.every(issue => isRecord(issue) && typeof issue.code === "string" && typeof issue.message === "string" && ["info","warning","error"].includes(String(issue.severity)) && Array.isArray(issue.objectIds) && issue.objectIds.every(id=>typeof id === "string"))) throw new FortisProtocolError();
+  return result;
 }

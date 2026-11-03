@@ -14,10 +14,12 @@ function formatUpdatedAt(updatedAt: string): string {
 }
 
 export function VariantsModal({ open, onClose }: Props) {
+  const [modal, contextHolder] = Modal.useModal();
   const {
     variants,
     activeVariantId,
     listStatus,
+    listError,
     saveStatus,
     conflictState,
     error,
@@ -35,7 +37,9 @@ export function VariantsModal({ open, onClose }: Props) {
   } = useDefenseVariantsStore();
   const { token } = theme.useToken();
   const syncStatus = useDefenseProjectStore((state) => state.syncStatus);
+  const enterpriseId = useDefenseProjectStore((state) => state.project.enterpriseId);
   const saveAttempt = useDefenseProjectStore((state) => state.saveAttempt);
+  const draftStorageError = useDefenseProjectStore((state) => state.draftStorageError);
   const restoreVerifiedDraft = useDefenseProjectStore((state) => state.restoreVerifiedDraft);
   const [newName, setNewName] = useState("");
   const [pendingLoadId, setPendingLoadId] = useState<string | null>(null);
@@ -49,7 +53,7 @@ export function VariantsModal({ open, onClose }: Props) {
   const saving = saveStatus === "saving";
   const trimmedName = newName.trim();
   const canSave = trimmedName.length > 0 && !saving;
-  const transitionRequired = syncStatus === "dirty" || saving || saveAttempt !== null;
+  const transitionRequired = syncStatus === "dirty" || saving || saveAttempt !== null || (syncStatus === "unverified" && Boolean(enterpriseId));
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -70,7 +74,7 @@ export function VariantsModal({ open, onClose }: Props) {
   };
 
   const requestLoad = (id: string) => {
-    if (id === activeVariantId) return;
+    if (id === activeVariantId && !conflictState && syncStatus !== "unverified") return;
     if (!transitionRequired) {
       void performLoad(id);
       return;
@@ -89,6 +93,7 @@ export function VariantsModal({ open, onClose }: Props) {
     setTransitionBusy(true);
     try {
       if (choice === "discard") {
+        if (!useDefenseProjectStore.getState().discardLocalChanges()) return;
         await performLoad(targetId);
         return;
       }
@@ -98,8 +103,8 @@ export function VariantsModal({ open, onClose }: Props) {
       else if (transitionSaveName.trim()) await saveAsNewVariant(transitionSaveName.trim());
       const afterProject = useDefenseProjectStore.getState();
       const afterVariants = useDefenseVariantsStore.getState();
-      const saveCompleted = afterVariants.saveStatus === "idle" && !afterVariants.error && afterProject.syncStatus === "saved" && afterProject.project.projectId !== current.project.projectId;
-      const overwriteCompleted = afterVariants.saveStatus === "idle" && !afterVariants.error && afterProject.syncStatus === "saved" && afterProject.project.projectId === current.project.projectId;
+      const saveCompleted = afterVariants.saveStatus === "idle" && !afterProject.accessError && !afterProject.saveAttempt && afterProject.syncStatus === "saved" && afterProject.project.projectId !== current.project.projectId;
+      const overwriteCompleted = afterVariants.saveStatus === "idle" && !afterProject.accessError && !afterProject.saveAttempt && afterProject.syncStatus === "saved" && afterProject.project.projectId === current.project.projectId;
       if (saveCompleted || overwriteCompleted) await performLoad(targetId);
     } finally {
       setTransitionBusy(false);
@@ -109,19 +114,22 @@ export function VariantsModal({ open, onClose }: Props) {
   const restoreDraft = () => {
     const record = recoveryDraft;
     if (!record) return;
-    const confirmRestore = () => {
+    const confirmRestore = async () => {
+      await checkRecoveryDraft();
+      const verified = useDefenseVariantsStore.getState().recoveryDraft;
+      if (!verified) return;
       const current = useDefenseProjectStore.getState();
       const variantState = useDefenseVariantsStore.getState();
       if (current.identityId !== record.userId || current.project.projectId !== record.projectId || current.project.enterpriseId !== record.enterpriseId || variantState.activeVariantId !== record.projectId) {
         clearRecoveryDraft();
         return;
       }
-      restoreVerifiedDraft(record);
+      restoreVerifiedDraft(verified);
       clearRecoveryDraft();
     };
     if (syncStatus === "dirty" || saving) {
-      Modal.confirm({ title: "Заменить текущие несохранённые изменения?", content: "Локальный черновик будет восстановлен поверх открытого проекта. Серверная версия останется без изменений до явного сохранения.", okText: "Восстановить черновик", cancelText: "Остаться", onOk: confirmRestore });
-    } else confirmRestore();
+      modal.confirm({ title: "Заменить текущие несохранённые изменения?", content: "Локальный черновик будет восстановлен поверх открытого проекта. Серверная версия останется без изменений до явного сохранения.", okText: "Восстановить черновик", cancelText: "Остаться", onOk: confirmRestore });
+    } else void confirmRestore();
   };
 
   return (
@@ -133,10 +141,12 @@ export function VariantsModal({ open, onClose }: Props) {
       width={520}
       destroyOnHidden
     >
+      {contextHolder}
+      {draftStorageError ? <Alert type="warning" showIcon title={draftStorageError} style={{ marginBottom: token.marginMD }} /> : null}
       {error ? (
         <Alert
           type="error"
-          message={error}
+          title={error}
           action={
             conflictState ? (
               <Button size="small" danger onClick={() => requestLoad(conflictState.projectId)}>
@@ -154,13 +164,15 @@ export function VariantsModal({ open, onClose }: Props) {
         />
       ) : null}
 
+      {listStatus === "error" ? <Alert type="warning" showIcon title="Не удалось загрузить варианты" description={listError} action={<Button size="small" onClick={() => void fetchVariants()}>Повторить загрузку</Button>} style={{ marginBottom: token.marginMD }} /> : null}
+
       {recoveryStatus === "loading" ? <div role="status" style={{ marginBottom: token.marginMD }}><Spin size="small" /> <Typography.Text type="secondary">Проверяем локальный черновик…</Typography.Text></div> : null}
-      {recoveryError ? <Alert type="warning" showIcon message="Локальное восстановление недоступно" description={recoveryError} style={{ marginBottom: token.marginMD }} /> : null}
+      {recoveryError ? <Alert type="warning" showIcon title="Локальное восстановление недоступно" description={recoveryError} style={{ marginBottom: token.marginMD }} /> : null}
       {recoveryDraft ? (
         <Alert
           type="warning"
           showIcon
-          message="Найден локальный несохранённый черновик"
+          title="Найден локальный несохранённый черновик"
           description="Доступ к серверному проекту подтверждён. Можно явно восстановить локальные изменения; они не отправятся на сервер автоматически."
           action={<Button size="small" onClick={restoreDraft}>Восстановить</Button>}
           style={{ marginBottom: token.marginMD }}
@@ -214,7 +226,7 @@ export function VariantsModal({ open, onClose }: Props) {
         onCancel={() => void resolveLoadTransition("stay")}
         footer={[
           <Button key="stay" onClick={() => void resolveLoadTransition("stay")} disabled={transitionBusy}>Остаться</Button>,
-          <Button key="discard" danger onClick={() => void resolveLoadTransition("discard")} loading={transitionBusy}>Отказаться и открыть</Button>,
+          <Button key="discard" danger onClick={() => void resolveLoadTransition("discard")} disabled={saving} loading={transitionBusy}>Отказаться и открыть</Button>,
           <Button key="save" type="primary" onClick={() => void resolveLoadTransition("save")} loading={transitionBusy} disabled={!activeVariantId && !transitionSaveName.trim()}>Сохранить и открыть</Button>,
         ]}
       >
@@ -258,6 +270,7 @@ function VariantsBody({
       </div>
     );
   }
+  if (listStatus === "error") return null;
 
   if (variants.length === 0) {
     return (

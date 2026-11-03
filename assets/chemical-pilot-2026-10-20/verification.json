@@ -1,0 +1,162 @@
+[
+  {
+    "id": "M01-pump",
+    "path": "models/M01-pump/M01-pump-source.glb",
+    "bytes": 52894160,
+    "sha256": "d3015fef0751f9329ab53a984403b4070d1b0dabc7c90968ff15f2f467f71e64",
+    "triangles": 1438432,
+    "images": [
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      }
+    ],
+    "embedded_textures": true,
+    "structure_check": "passed"
+  },
+  {
+    "id": "M03-heat-exchanger",
+    "path": "models/M03-heat-exchanger/M03-heat-exchanger-source.glb",
+    "bytes": 26937944,
+    "sha256": "5c77ed4590b7915933cecf64e569812c67d1d0f76d8e70792c8c7f3905070512",
+    "triangles": 699188,
+    "images": [
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      }
+    ],
+    "embedded_textures": true,
+    "structure_check": "passed"
+  },
+  {
+    "id": "M04-cooling-tower",
+    "path": "models/M04-cooling-tower/M04-cooling-tower-source.glb",
+    "bytes": 80489112,
+    "sha256": "2be8637f94cb6cf82ce213268fce5b362db75724f462ba3537b9ee08f3b266e3",
+    "triangles": 2389354,
+    "images": [
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      }
+    ],
+    "embedded_textures": true,
+    "structure_check": "passed"
+  },
+  {
+    "id": "M07-scrubber",
+    "path": "models/M07-scrubber/M07-scrubber-source.glb",
+    "bytes": 51117200,
+    "sha256": "2edaa9ed193cb8b86695e945d5ecb66d3d5743036bc6a719297a066f6b9a9a6c",
+    "triangles": 1492846,
+    "images": [
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      }
+    ],
+    "embedded_textures": true,
+    "structure_check": "passed"
+  },
+  {
+    "id": "M16-tanker-truck",
+    "path": "models/M16-tanker-truck/M16-tanker-truck-source.glb",
+    "bytes": 70330832,
+    "sha256": "347ab535904168e82006668c11a5b5c9aefcbfa7fbb968017f786205ac51039f",
+    "triangles": 2067708,
+    "images": [
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      },
+      {
+        "mime": "image/jpeg",
+        "dimensions": [
+          2048,
+          2048
+        ]
+      }
+    ],
+    "embedded_textures": true,
+    "structure_check": "passed"
+  }
+]
