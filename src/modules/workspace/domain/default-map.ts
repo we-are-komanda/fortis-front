@@ -12,7 +12,7 @@ export function openDefaultMap(): Promise<string> {
     if (page.items[0]) return page.items[0].projectId;
     const project = { ...createWorkspaceDefenseProject(),
       enterpriseId: TEST_ENTERPRISE_ID, projectName: "Тестовая конфигурация",
-      baseObject: { id: TEST_ENTERPRISE_ID, name: "Тестовое предприятие", center: { lat: 55, lng: 40 } },
+      baseObject: { id: TEST_ENTERPRISE_ID, name: "Тестовое предприятие", center: { lat: -41.2865, lng: 174.7762 } },
       updatedAt: "2026-10-18T00:00:00.000Z",
     };
     const attempt = prepareProjectSave("create", project.projectName, project, 0);

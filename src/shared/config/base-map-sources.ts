@@ -46,6 +46,25 @@ const osmAttribution =
 const openTopoMapAttribution =
   'Map data: © <a href="https://openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors | DEM: <a href="http://viewfinderpanoramas.org" target="_blank" rel="noreferrer">SRTM</a>, <a href="https://sonny.4lima.de/" target="_blank" rel="noreferrer">Sonny</a> | Map style: © <a href="https://opentopomap.org" target="_blank" rel="noreferrer">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noreferrer">CC-BY-SA</a>)';
 
+// Static property reads are required for Next.js to inline browser configuration.
+function publicBaseMapEnv(): NodeJS.ProcessEnv {
+  return {
+    NODE_ENV: process.env.NODE_ENV,
+    NEXT_PUBLIC_FORTIS_ALLOW_EXTERNAL_BASEMAPS: process.env.NEXT_PUBLIC_FORTIS_ALLOW_EXTERNAL_BASEMAPS,
+    NEXT_PUBLIC_FORTIS_DEFAULT_BASEMAP: process.env.NEXT_PUBLIC_FORTIS_DEFAULT_BASEMAP,
+    NEXT_PUBLIC_FORTIS_INTERNAL_BASEMAP_ATTRIBUTION: process.env.NEXT_PUBLIC_FORTIS_INTERNAL_BASEMAP_ATTRIBUTION,
+    NEXT_PUBLIC_FORTIS_INTERNAL_BASEMAP_STYLE_URL: process.env.NEXT_PUBLIC_FORTIS_INTERNAL_BASEMAP_STYLE_URL,
+    NEXT_PUBLIC_FORTIS_INTERNAL_BASEMAP_TILES: process.env.NEXT_PUBLIC_FORTIS_INTERNAL_BASEMAP_TILES,
+    NEXT_PUBLIC_FORTIS_INTERNAL_BASEMAP_TYPE: process.env.NEXT_PUBLIC_FORTIS_INTERNAL_BASEMAP_TYPE,
+    NEXT_PUBLIC_FORTIS_SATELLITE_BASEMAP_ATTRIBUTION: process.env.NEXT_PUBLIC_FORTIS_SATELLITE_BASEMAP_ATTRIBUTION,
+    NEXT_PUBLIC_FORTIS_SATELLITE_BASEMAP_TILES: process.env.NEXT_PUBLIC_FORTIS_SATELLITE_BASEMAP_TILES,
+    NEXT_PUBLIC_FORTIS_SATELLITE_BASEMAP_TYPE: process.env.NEXT_PUBLIC_FORTIS_SATELLITE_BASEMAP_TYPE,
+    NEXT_PUBLIC_FORTIS_TOPOGRAPHIC_BASEMAP_ATTRIBUTION: process.env.NEXT_PUBLIC_FORTIS_TOPOGRAPHIC_BASEMAP_ATTRIBUTION,
+    NEXT_PUBLIC_FORTIS_TOPOGRAPHIC_BASEMAP_TILES: process.env.NEXT_PUBLIC_FORTIS_TOPOGRAPHIC_BASEMAP_TILES,
+    NEXT_PUBLIC_FORTIS_YANDEX_MAPS_API_KEY: process.env.NEXT_PUBLIC_FORTIS_YANDEX_MAPS_API_KEY,
+  };
+}
+
 function parseBoolean(value: string | undefined, fallback: boolean) {
   if (!value) return fallback;
   if (value === "true") return true;
@@ -77,6 +96,8 @@ function buildRasterStyle(source: BaseMapSource): StyleSpecification {
         type: "raster",
         tiles: source.tiles,
         tileSize: source.tileSize ?? 256,
+        minzoom: source.minZoom ?? 0,
+        maxzoom: source.maxZoom ?? 22,
         attribution: source.attribution,
       },
     },
@@ -142,12 +163,29 @@ function buildInternalBaseMapSource(env: NodeJS.ProcessEnv): BaseMapSource {
   };
 }
 
-export function createBaseMapSources(env: NodeJS.ProcessEnv = process.env): BaseMapSource[] {
+export function createBaseMapSources(env: NodeJS.ProcessEnv = publicBaseMapEnv()): BaseMapSource[] {
   const topographicTiles =
     parseCsv(env.NEXT_PUBLIC_FORTIS_TOPOGRAPHIC_BASEMAP_TILES) ?? ["https://tile.opentopomap.org/{z}/{x}/{y}.png"];
   const satelliteTiles = parseCsv(env.NEXT_PUBLIC_FORTIS_SATELLITE_BASEMAP_TILES);
+  const yandexKey = readRequiredString(env.NEXT_PUBLIC_FORTIS_YANDEX_MAPS_API_KEY);
 
   return [
+    {
+      id: "yandex-maps",
+      title: "Яндекс Карты",
+      description: "Карта-схема Яндекса.",
+      category: "base",
+      type: "raster-xyz",
+      tiles: yandexKey ? [`https://tiles.api-maps.yandex.ru/v1/tiles/?apikey=${encodeURIComponent(yandexKey)}&lang=ru_RU&x={x}&y={y}&z={z}&l=map&projection=web_mercator&maptype=map`] : undefined,
+      tileSize: 256,
+      maxZoom: 20,
+      attribution: '<a href="https://yandex.ru/maps/" target="_blank" rel="noreferrer">© Яндекс</a>',
+      enabled: Boolean(yandexKey),
+      isExternal: true,
+      requiresApiKey: true,
+      requiresLicenseCheck: true,
+      allowedInClosedContour: false,
+    },
     {
       id: "openfreemap-bright",
       title: "OpenFreeMap Bright",
@@ -213,7 +251,7 @@ export function createBaseMapSources(env: NodeJS.ProcessEnv = process.env): Base
   ];
 }
 
-export function getAvailableBaseMapSources(env: NodeJS.ProcessEnv = process.env) {
+export function getAvailableBaseMapSources(env: NodeJS.ProcessEnv = publicBaseMapEnv()) {
   const allowExternalBaseMaps = parseBoolean(env.NEXT_PUBLIC_FORTIS_ALLOW_EXTERNAL_BASEMAPS, true);
   return createBaseMapSources(env).filter((source) => {
     if (!source.enabled) return false;
@@ -224,14 +262,15 @@ export function getAvailableBaseMapSources(env: NodeJS.ProcessEnv = process.env)
 
 export function resolveDefaultBaseMapSourceId(
   availableSources = getAvailableBaseMapSources(),
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = publicBaseMapEnv(),
 ) {
   const configuredDefault = readRequiredString(env.NEXT_PUBLIC_FORTIS_DEFAULT_BASEMAP);
   if (configuredDefault && availableSources.some((source) => source.id === configuredDefault)) {
     return configuredDefault;
   }
 
-  const preferredDefault = availableSources.find((source) => source.id === "openfreemap-bright");
+  const preferredDefault = availableSources.find((source) => source.id === "yandex-maps")
+    ?? availableSources.find((source) => source.id === "openfreemap-bright");
   if (preferredDefault) return preferredDefault.id;
 
   const fallback = availableSources[0];

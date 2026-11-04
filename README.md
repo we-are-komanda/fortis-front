@@ -46,3 +46,17 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+### Яндекс Карты
+
+В существующую GIS-карту подключён официальный **Yandex Tiles API** (карта-схема, не спутник). Ключ нужен именно для пакета Tiles API.
+
+1. Получите ключ в https://yandex.ru/maps-api/console и разрешите HTTP Referer `localhost` для локальной разработки, домен приложения — для публикации.
+2. Добавьте в игнорируемый `.env.local`: `NEXT_PUBLIC_FORTIS_YANDEX_MAPS_API_KEY=ваш_ключ`.
+3. Перезапустите dev-сервер; production/desktop требует новой сборки. Переменная публичная и попадает в браузерный bundle, поэтому ключ ограничивается доменами.
+4. В меню «Карта» выберите «Яндекс Карты». Для нового браузерного состояния это источник по умолчанию при наличии ключа; ранее сохранённый выбор сохраняется. Явный `NEXT_PUBLIC_FORTIS_DEFAULT_BASEMAP` имеет приоритет.
+
+Используется `projection=web_mercator`, zoom 0–20, дальнейшее приближение увеличивает тайлы zoom 20. Координаты средств, слои и общий проект с Монте-Карло не меняются. Логотип — из официального комплекта Яндекса. При ошибке действует существующий переход на локальную карту; тайлы Яндекса не включаются в офлайн-пакет. При `NEXT_PUBLIC_FORTIS_ALLOW_EXTERNAL_BASEMAPS=false` источник недоступен.
+
+Документация: https://yandex.ru/maps-api/docs/tiles-api/quickstart.html и https://yandex.ru/maps-api/docs/tiles-api/request.html.

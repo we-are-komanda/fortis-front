@@ -18,10 +18,10 @@ test("old sources remain unknown; malformed finance/source metadata fails closed
  assert.equal(normalizeDefenseAssetPayload({id:"x",name:"Old"}).provenance,null);
  for(const field of [{provenance:{quality:"confirmed",sourceLabel:{bad:"child"}}},{unitPriceMinor:-1},{unitPriceMinor:"-1"},{currency:"USD"},{components:[{name:"x",quantity:1.5,unitPriceMinor:"0"}]}]) assert.throws(()=>normalizeDefenseAssetPayload({id:"x",name:"Invalid",...field}),FortisProtocolError);
 });
-test("bundled demo quality survives seed serialization and project export/import",()=>{
- assert.ok(buildPublicAssetSeedPayloads().every(asset=>asset.provenance?.quality==="demo"));
+test("supplier source quality survives seed serialization and project export/import",()=>{
+ assert.ok(buildPublicAssetSeedPayloads().every(asset=>asset.provenance?.quality==="estimated"));
  const project=importDefenseProjectJson(exportDefenseProjectJson(createDefaultDefenseProject()));
- assert.ok(project.assetLibrary.every(asset=>asset.provenance?.quality==="demo"));
+ assert.ok(project.assetLibrary.every(asset=>asset.provenance?.quality==="estimated"));
 });
 
 test("legacy backend seed lineage remains demo even with supplied confirmed sources",()=>{

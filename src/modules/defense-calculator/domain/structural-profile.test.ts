@@ -1,6 +1,7 @@
+import { createLegacyDefenseProject as createDefaultDefenseProject } from "../../../../test/fixtures/legacy-defense-project";
 // Run: npx tsx src/modules/defense-calculator/domain/structural-profile.test.ts
 
-import { createDefaultDefenseProject, placeObjectInProject } from "@/shared/lib/defense-project";
+import { placeObjectInProject } from "@/shared/lib/defense-project";
 import { buildStructuralProfile } from "@/modules/defense-calculator/domain/structural-profile";
 import type { DefenseProject } from "@/shared/types/defense-project";
 

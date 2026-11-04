@@ -1,10 +1,15 @@
 "use client";
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DefenseProject } from "@/shared/types/defense-project";
+import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
+import { buildProjectScenario, type ProjectScenario } from "../../domain/project-scenario";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTheme } from "next-themes";
+import { Button, Modal, Typography, theme } from "antd";
 import libraryData from "../../infra/data/scenario/library-v1.json";
 import { clockAt, formatTime, initialClock, transitionClock, type Clock, type ClockAction, type Library, type Track } from "../../domain/scenario-playback";
-import { computeBatch, defaultMotionConfig, frameAt, generateRun, motionVersion, protectionRule, summarizeBatch, summarizeRun, sectorLabels, sectorColors, type MotionConfig, type RunSummary } from "../../domain/mass-motion";
+import { computeBatch, defaultMotionConfig, effectModel, frameAt, generateRun, motionVersion, protectionRule, summarizeBatch, summarizeRun, sectorLabels, sectorColors, type MotionConfig, type RunSummary } from "../../domain/mass-motion";
+import { factoryCampusZoom } from "../../domain/factory-campus";
 import { workingZoom, type ScenarioLayers } from "../../domain/scenario-site";
 import { ScenarioMap2D } from "./scenario-map-2d";
 import { SceneBoundary } from "./scene-boundary";
@@ -15,9 +20,47 @@ const library = libraryData as Library;
 const noReferenceTracks: Track[] = [];
 const layerLabels = { terrain: "Рельеф", enterprise: "Предприятие", tracks: "Следы движения", radius: "Радиус 10 км" };
 
-export default function MassScenarioWorkspace({ onReturn, onExit }: { onReturn: () => void; onExit: () => void }) {
+const statusLabels: Record<string, string> = { active: "Действует", planned: "Запланировано", inactive: "Выключено", maintenance: "Обслуживание" };
+const parseCoverage = (value: string) => { if (!/^\d+(\.\d+)?$/.test(value)) return null; const number = Number(value); return number > 0 && number <= 100000 ? number : null; };
+// Controlled inputs with immediate commit to the placed instance (ADR-0009). Invalid text is ignored,
+// so the field reverts to the saved value instead of silently clearing coverage.
+function CoverageSettingRow({ placement, onCommit }: { placement: ProjectScenario["placements"][number]; onCommit: (patch: { customCoverageRadius?: number; customCoverageAngle?: number }) => void }) {
+  const radiusChange = (text: string) => {
+    if (text === "") onCommit({ customCoverageRadius: undefined });
+    else { const value = parseCoverage(text); if (value !== null) onCommit({ customCoverageRadius: value }); }
+  };
+  const angleChange = (text: string) => {
+    if (text === "") onCommit({ customCoverageAngle: undefined });
+    else { const value = parseCoverage(text); if (value !== null) onCommit({ customCoverageAngle: Math.min(360, value) }); }
+  };
+  return <div data-coverage-row={placement.id} className={styles.coverageRow}>
+    <div className={styles.coverageHeader}>
+      <span className={styles.coverageName} title={placement.name}>{placement.name} · {placement.quantity} шт. · {statusLabels[placement.status]}</span>
+      <span data-coverage-participates={placement.participates} className={styles.coverageBadge}>{placement.participates ? "учитывается" : "не участвует"}</span>
+    </div>
+    <div className={styles.coverageInputs}>
+      <label>Дальность, м
+        <input inputMode="decimal" value={placement.coverageRadiusM === null ? "" : String(placement.coverageRadiusM)} placeholder="не задана" data-coverage-radius={placement.id}
+          onChange={event => radiusChange(event.target.value)} />
+      </label>
+      <label>Угол, °
+        <input inputMode="decimal" value={String(placement.coverageAngleDeg)} data-coverage-angle={placement.id}
+          onChange={event => angleChange(event.target.value)} />
+      </label>
+    </div>
+  </div>;
+}
+
+export default function MassScenarioWorkspace({ project }: { project?: DefenseProject }) {
+  const projectScene = useMemo(() => project ? buildProjectScenario(project) : undefined, [project]);
+  const protectionRadiusM = projectScene?.protectionRadiusM ?? protectionRule.radiusM;
+  const siteZoom = projectScene?.workingZoom ?? workingZoom;
+  const selectProjectObject = useDefenseProjectStore(state => state.selectObject);
+  const updatePlacedObject = useDefenseProjectStore(state => state.updatePlacedObject);
   const { resolvedTheme } = useTheme();
+  const { token } = theme.useToken();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [referenceOpen, setReferenceOpen] = useState(false);
   const [config, setConfig] = useState(defaultMotionConfig);
   const [seedText, setSeedText] = useState(String(defaultMotionConfig.seed));
   const [runIndex, setRunIndex] = useState(0);
@@ -30,15 +73,16 @@ export default function MassScenarioWorkspace({ onReturn, onExit }: { onReturn: 
   const [view, setView] = useState<"2d" | "3d">("3d");
   const [webgl, setWebgl] = useState<boolean | null>(null);
   const [ready, setReady] = useState(false);
-  const [zoom, setZoom] = useState(1.1);
+  const [zoom, setZoom] = useState(projectScene?.workingZoom ?? 1.1);
   const [fit, setFit] = useState(0);
   const [objectId, setObjectId] = useState("");
   const [layers, setLayers] = useState<ScenarioLayers>({ terrain: true, enterprise: true, tracks: true, radius: true });
-  const run = useMemo(() => generateRun(config, library, runIndex), [config, runIndex]);
+  const defenseUnits = useMemo(() => projectScene?.defenseUnits ?? [], [projectScene]);
+  const run = useMemo(() => generateRun(config, library, runIndex, protectionRadiusM, defenseUnits), [config, runIndex, protectionRadiusM, defenseUnits]);
   const summary = useMemo(() => summarizeRun(run), [run]);
   const aggregate = useMemo(() => results ? summarizeBatch(results) : null, [results]);
   const frame = useMemo(() => frameAt(run, clock.timeMs), [run, clock.timeMs]);
-  const displayMarkers = useMemo(() => [...frame.markers, ...frame.signals], [frame]);
+  const displayMarkers = useMemo(() => [...frame.markers, ...frame.signals, ...frame.intercepts], [frame]);
   const nextEventMs = Math.min(...run.objects.filter(object => object.endMs > clock.timeMs).map(object => object.endMs));
   const playing = clock.status === "playing";
   const validSeed = /^\d+$/.test(seedText) && Number(seedText) <= 0xffffffff;
@@ -87,7 +131,7 @@ export default function MassScenarioWorkspace({ onReturn, onExit }: { onReturn: 
     cancel(); act({ type: "pause" }); setResults(null); setNotice(""); setProgress(0);
     const controller = new AbortController(); batch.current = controller;
     try {
-      const next = await computeBatch(config, library, batchSize, controller.signal, setProgress);
+      const next = await computeBatch(config, library, batchSize, controller.signal, setProgress, protectionRadiusM, defenseUnits);
       if (!controller.signal.aborted) { setResults(next); setNotice(`Готово: ${next.length} прогонов. Выберите любой для просмотра.`); }
     } catch (error) {
       if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Ошибка расчёта.");
@@ -95,13 +139,13 @@ export default function MassScenarioWorkspace({ onReturn, onExit }: { onReturn: 
   };
   const selectRun = (index: number) => { act({ type: "reset" }); setRunIndex(index); };
   const focus = (value: number) => { setZoom(value); setFit(current => current + 1); };
-  const focusCampus = useCallback(() => { setZoom(workingZoom); setFit(current => current + 1); }, []);
+  const focusCampus = useCallback(() => { setZoom(siteZoom); setFit(current => current + 1); }, [siteZoom]);
   const seek = useCallback((value: number) => { const now = performance.now(); setClock(current => transitionClock(current, { type: "seek", timeMs: value, now }, config.durationMs)); }, [config.durationMs]);
-  const sceneProps = { tracks: noReferenceTracks, markers: displayMarkers, timeMs: clock.timeMs, layers, zoom, preview: false, selectedObject: objectId, onSelectObject: setObjectId, onFocusCampus: focusCampus };
+  const selectedProjectPlacement = projectScene?.placements.find(object => object.id === project?.selectedObjectId);
+  const sceneProps = { projectScene, protectionRadiusM, tracks: noReferenceTracks, markers: displayMarkers, timeMs: clock.timeMs, layers, zoom, preview: false, selectedObject: project ? project.selectedObjectId : objectId, onSelectObject: project ? selectProjectObject : setObjectId };
   const chart = useMemo(() => summary.curve.map((point, index) => `${index ? "H" : "M"}${(point.timeMs / config.durationMs * 600).toFixed(3)}${index ? "V" : ","}${(60 - point.active / Math.max(1, summary.peak) * 56).toFixed(3)}`).join(" "), [summary, config.durationMs]);
-  return <section className={styles.root} data-mass-workspace data-time-ms={clock.timeMs} data-status={clock.status} data-active={frame.markers.length} data-run={runIndex} data-seed={run.seed}>
-    <header className={styles.header}><h1>Массовый прогон</h1><nav className={styles.tabs} aria-label="Режим моделирования"><button onClick={onReturn}>Учебные записи</button><button aria-pressed>Кинематика + Монте-Карло</button></nav><button className={styles.exit} onClick={onExit}>К карте</button></header>
-    <div className={styles.synthetic}>Синтетическое движение · {config.count} объектов за {config.durationMs / 60000} минут<span>360° · движение в плане · условная защита на границе зоны</span></div>
+  return <section className={styles.root} data-mass-workspace data-project-id={project?.projectId} data-base-object-id={project?.baseObject.id} data-time-ms={clock.timeMs} data-status={clock.status} data-active={frame.markers.length} data-run={runIndex} data-seed={run.seed}>
+    <header className={styles.header}><h2>Монте-Карло</h2><p>{projectScene?.name ?? "Массовое моделирование"}</p></header>
     <button className={styles.settingsToggle} aria-expanded={settingsOpen} aria-controls="mass-settings" onClick={() => setSettingsOpen(open => !open)}>{settingsOpen ? "Скрыть настройки · к сцене" : "Параметры и результаты Монте-Карло"}</button>
     <div className={`${styles.layout} ${styles.massLayout}`} data-settings-open={settingsOpen}>
       <aside id="mass-settings" className={styles.library} aria-label="Настройки массового прогона">
@@ -113,44 +157,37 @@ export default function MassScenarioWorkspace({ onReturn, onExit }: { onReturn: 
           <label className={styles.layer}><input type="checkbox" checked={config.scatter > 0} onChange={e => change({ scatter: e.target.checked ? .25 : 0 })} />Неравномерно по времени</label>
           <p>{config.scatter > 0 ? "Интервалы появления и длительность движения меняются от прогона к прогону." : "Объекты появляются через равные интервалы. Направления остаются случайными."}</p>
         </div>
-        <section className={`${styles.section} ${styles.protectionEvents}`} aria-label="Журнал учебной защиты">
-          <h2>Учебная защита</h2>
-          <p>Достижение зелёной границы → условное срабатывание. Радиус {protectionRule.radiusM} м — граница упражнения, а не дальность средства защиты.</p>
-          <p>{frame.events.length ? `Срабатываний: ${frame.events.length}. Последние ${Math.min(5, frame.events.length)}:` : "Срабатываний пока нет."}</p>
-          <ol>{frame.events.slice(0, 5).map(event => <li key={event.id} data-protection-event={event.id}>
-            <button onClick={() => { seek(event.endMs); focusCampus(); }} aria-label={`Показать срабатывание объекта ${event.id + 1}`}>
-              <time>{time(event.endMs)}</time><span>Объект {event.id + 1} · {sectorLabels[event.sector]}<small>Учебное срабатывание</small></span>
-            </button>
-          </li>)}</ol>
-        </section>
-        <section className={styles.section} aria-label="Направления входа"><h2>Откуда появляются · 360°</h2>
-          <p>Свой угол у каждого объекта. Секторы ниже только группируют статистику.</p>
-          <dl className={styles.directionStats}>{sectorLabels.map((label, sector) => <div key={label} data-sector={sector}>
-            <dt><i style={{ background: sectorColors[sector] }} aria-hidden />{label}</dt><dd>{summary.sectorCounts[sector]} <small>объектов</small>{aggregate && <small>p90 активных: {aggregate.sectorP90[sector]}</small>}</dd>
-          </div>)}</dl>
-          <p>{aggregate ? "Число объектов — выбранный прогон; p90 — квантиль пиков активности в секторе по пакету." : "Количество за весь выбранный прогон. p90 по секторам появится после расчёта пакета."}</p>
-        </section>
         <div className={styles.section}><h2>Монте-Карло</h2>
           <label className={styles.pair}>Размер пакета<select aria-label="Размер пакета" value={batchSize} onChange={e => { cancel(); selectRun(0); setResults(null); setBatchSize(Number(e.target.value)); setNotice(""); }}>{[100, 500].map(n => <option key={n} value={n}>{n} прогонов</option>)}</select></label>
           <div className={styles.batchActions}><button className={styles.primary} disabled={progress !== null || !validSeed} onClick={calculate}>Рассчитать пакет</button>{progress !== null && <button onClick={() => { cancel(); setNotice("Расчёт отменён. Частичные результаты не сохранены."); }}>Отменить</button>}</div>
           {progress !== null && <div role="status"><progress max={batchSize} value={progress} aria-label="Прогресс расчёта" /> {progress} / {batchSize}</div>}
-          {aggregate && <div data-batch-result><p>Пики активных · {results!.length} прогонов</p><dl className={styles.batchStats}>{Object.entries({ Минимум: aggregate.min, Медиана: aggregate.median, p90: aggregate.p90, Максимум: aggregate.max }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>Средняя одновременная нагрузка: {aggregate.meanActive.toFixed(1)} объекта. p90 — квантиль пиков, не вероятность воздействия.</p></div>}
+          {aggregate && <div data-batch-result><p>Пики активных · {results!.length} прогонов</p><dl className={styles.batchStats}>{Object.entries({ Минимум: aggregate.min, Медиана: aggregate.median, p90: aggregate.p90, Максимум: aggregate.max }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>Средняя одновременная нагрузка: {aggregate.meanActive.toFixed(1)} объекта. p90 — квантиль пиков, не вероятность воздействия.</p>{projectScene && <p data-batch-neutralized>Условно нейтрализовано: медиана {(aggregate.neutralizedRates.median * 100).toFixed(1)}%, p90 {(aggregate.neutralizedRates.p90 * 100).toFixed(1)}% из {config.count} объектов прогона.</p>}</div>}
           <p role="status">{notice}</p>
         </div>
-        <fieldset className={styles.section}><legend>Слои карты</legend>{(Object.entries(layerLabels) as [keyof ScenarioLayers, string][]).map(([key, label]) => <label className={styles.layer} key={key}><input type="checkbox" checked={layers[key]} onChange={e => setLayers(current => ({ ...current, [key]: e.target.checked }))} />{label}</label>)}</fieldset>
-        <details className={styles.section}><summary>Правила и версии</summary><p>{motionVersion} · {protectionRule.id} · Mulberry32<br />{library.scene.id}@{library.scene.version} · terrain@{library.scene.terrainVersion} · enterprise@{library.scene.enterpriseModelVersion}</p><p>Угол входа непрерывный, 0–360° от севера по часовой стрелке, равномерный по кругу. Восемь секторов не ограничивают движение восемью линиями.</p><p>Схематическое движение в плане от радиуса 10 км до учебной границы {protectionRule.radiusM} м вокруг всей площадки, базовая длительность 4 минуты. Высота полёта не моделируется. При достижении границы движение завершается, фиксируется одно условное срабатывание. Зелёная отметка видна минуту времени сценария; журнал сохраняет события до смены прогона. Эффективность реальных средств защиты не рассчитывается. Пакет и выбранный прогон используют один генератор.</p></details>
+        <fieldset className={styles.section}><legend>Эффективность средств</legend>
+          {projectScene ? <>
+            {projectScene.placements.length ? projectScene.placements.map(placement =>
+              <CoverageSettingRow key={placement.id} placement={placement}
+                onCommit={patch => updatePlacedObject(placement.id, patch)} />)
+              : <p>Размещённых средств нет. Расчёт оценивает только движение.</p>}
+            <p>Дальность и угол — условные параметры расчёта (оценки). Статус учитывается: «Действует» и «Запланировано» участвуют, «Выключено» и «Обслуживание» — нет. Изменения применяются к размещению и попадут на сервер только после явного сохранения проекта.</p>
+          </> : <p>Проект не выбран: расчёт без конфигурации движения.</p>}
+        </fieldset>
+        <fieldset className={styles.section}><legend>Слои карты</legend>{(Object.entries(layerLabels) as [keyof ScenarioLayers, string][]).filter(([key]) => !projectScene || key !== "terrain").map(([key, label]) => <label className={styles.layer} key={key}><input type="checkbox" checked={layers[key]} onChange={e => setLayers(current => ({ ...current, [key]: e.target.checked }))} />{projectScene && key === "enterprise" ? "Объект и средства" : label}</label>)}</fieldset>
       </aside>
       <div className={styles.center}>
         <div className={styles.viewToolbar}>
+          <button aria-haspopup="dialog" onClick={() => setReferenceOpen(true)}>Справочная информация</button>
+          {projectScene && <button onClick={focusCampus}>Объект и средства · {projectScene.placements.length}</button>}
           <label className={styles.runSelect}>Прогон<select aria-label="Номер прогона" value={runIndex} onChange={e => selectRun(Number(e.target.value))}>{Array.from({ length: results?.length ?? 1 }, (_, index) => <option value={index} key={index}>№{index + 1}{results ? ` · пик ${results[index].peak}` : " · предварительный"}</option>)}</select></label>
         </div>
-        {zoom >= 8 && <p className={styles.offscreen}>Дальние объекты вне кадра. Здесь видны подход к предприятию и учебные срабатывания на зелёной границе.</p>}
-        <div className={styles.motionCounters} aria-label="Состояние объектов"><span>Ожидают <strong data-waiting>{frame.waiting}</strong></span><span>Активны <strong>{frame.markers.length}</strong></span><span>Учебные срабатывания <strong data-finished>{frame.finished}</strong></span><span>Пик прогона <strong>{summary.peak}</strong></span></div>
+        {zoom >= 8 && <p className={styles.offscreen}>Дальние объекты вне кадра. Здесь видны подход к предприятию и условные срабатывания на зелёной границе.</p>}
+        <div className={styles.motionCounters} aria-label="Состояние объектов"><span>Ожидают <strong data-waiting>{frame.waiting}</strong></span><span>Активны <strong>{frame.markers.length}</strong></span><span>Условные срабатывания <strong data-finished>{frame.finished}</strong></span><span>Нейтрализованы <strong data-neutralized>{frame.neutralized}</strong></span><span>Пик прогона <strong>{summary.peak}</strong></span></div>
         <div className={styles.stage} data-view={view}>
-          <div className={styles.mapControls}><button aria-pressed={view === "2d"} onClick={() => { setView("2d"); setReady(true); }}>2D</button><button aria-pressed={view === "3d"} disabled={webgl === false} onClick={() => { if (view !== "3d") { setReady(false); setView("3d"); } }}>3D</button></div>
+          <div className={styles.mapControls}><button aria-label="Приблизить к объекту" title="Приблизить к объекту" onClick={() => focus(factoryCampusZoom)}>К объекту</button><button aria-pressed={view === "2d"} onClick={() => { setView("2d"); setReady(true); }}>2D</button><button aria-pressed={view === "3d"} disabled={webgl === false} onClick={() => { if (view !== "3d") { setReady(false); setView("3d"); } }}>3D</button></div>
           {view === "2d" ? <ScenarioMap2D {...sceneProps} /> : webgl && <SceneBoundary onError={onError}><Scene3D {...sceneProps} fit={fit} dark={resolvedTheme === "dark"} onReady={onReady} onError={onError} onZoom={setZoom} /></SceneBoundary>}
-          <div className={styles.zoomControls}><button aria-label="Приблизить" onClick={() => setZoom(z => Math.min(128, z * 1.4))}>+</button><button aria-label="Отдалить" onClick={() => setZoom(z => Math.max(1, z / 1.4))}>−</button><button aria-label="Вписать обзор 360°" onClick={() => focus(1.1)}>↔</button></div>
-          <div className={styles.sceneCaption}>Зелёный контур — учебная зона защиты · {view.toUpperCase()}{frame.signals.length > 0 && <strong data-protection-notice>Условное срабатывание · объект {frame.events[0].id + 1} · {time(frame.events[0].endMs)}</strong>}</div>
+          <div className={styles.zoomControls}><button aria-label="Приблизить" onClick={() => setZoom(z => Math.min(128, z * 1.4))}>+</button><button aria-label="Отдалить" onClick={() => setZoom(z => Math.max(projectScene ? .01 : 1, z / 1.4))}>−</button><button aria-label="Вписать обзор 360°" onClick={() => focus(1.1)}>↔</button></div>
+          <div className={styles.sceneCaption}>{selectedProjectPlacement && <strong>{selectedProjectPlacement.name} · {selectedProjectPlacement.quantity} шт.</strong>}Зелёный контур — условная зона защиты · {view.toUpperCase()}{frame.signals.length > 0 && <strong data-protection-notice>Условное срабатывание · объект {frame.events[0].id + 1} · {time(frame.events[0].endMs)}</strong>}</div>
         </div>
         <div className={styles.transport}>
           <div className={styles.transportRow}><button className={styles.primary} disabled={!ready || !validSeed} onClick={() => act({ type: playing ? "pause" : "play" })}>{playing ? "Пауза" : clock.status === "ended" ? "Повторить" : "Пуск"}</button><button onClick={() => act({ type: "reset" })}>В начало</button><output aria-label="Время массового прогона">{time(clock.timeMs)} / {time(config.durationMs)}</output><label>Скорость<select aria-label="Скорость просмотра" value={clock.rate} onChange={e => { const rate = Number(e.target.value) as Clock["rate"], now = performance.now(); setClock(current => transitionClock(current, { type: "rate", rate, now }, config.durationMs)); }}>{[1, 10, 30, 60].map(rate => <option value={rate} key={rate}>{rate}×</option>)}</select></label></div>
@@ -160,6 +197,46 @@ export default function MassScenarioWorkspace({ onReturn, onExit }: { onReturn: 
           <div className={styles.ticks}><span>00:00</span><span>Активных: 0–{summary.peak} · среднее {summary.mean.toFixed(1)}</span><span>{time(config.durationMs)}</span></div>
         </div>
       </div>
-    </div><footer className={styles.footer}>Прогон №{runIndex + 1} · seed {run.seed} · {motionVersion} · сессия сбрасывается при выходе или перезагрузке</footer>
+    </div>
+    <Modal title="Справочная информация" open={referenceOpen} onCancel={() => setReferenceOpen(false)} footer={null} width={520} styles={{ body: { maxHeight: "calc(100dvh - 240px)", overflowY: "auto", "--line": token.colorBorder, "--secondary": token.colorTextSecondary, "--protection": token.colorSuccess } as CSSProperties }} destroyOnHidden closable={{ "aria-label": "Закрыть справку" }}>
+      <Typography.Paragraph>Синтетическое движение · {config.count} объектов за {config.durationMs / 60000} минут</Typography.Paragraph>
+      <Typography.Paragraph type="secondary">360° · движение в плане · условная защита на границе зоны</Typography.Paragraph>
+      <Typography.Title level={5}>Условная зона защиты</Typography.Title>
+      <Typography.Paragraph>Объект, дошедший до зелёной границы без нейтрализации → условное срабатывание (прорыв). Радиус {protectionRadiusM} м — граница условной зоны защиты, а не дальность средства защиты.</Typography.Paragraph>
+      {projectScene && <Typography.Paragraph type="secondary">Конфигурация с карты участвует в расчёте: объекты, вошедшие в условную зону действующего средства, считаются нейтрализованными с заданной вероятностью.</Typography.Paragraph>}
+      <section className={styles.protectionEvents} aria-label="Журнал условных срабатываний">
+        <Typography.Title level={5}>Журнал условных срабатываний</Typography.Title>
+        <Typography.Paragraph>{frame.events.length ? `Прорвавшихся объектов: ${frame.events.length}. Последние ${Math.min(5, frame.events.length)}:` : "Срабатываний пока нет."}</Typography.Paragraph>
+        <ol>{frame.events.slice(0, 5).map(event => <li key={event.id} data-protection-event={event.id}>
+          <Button style={{ height: "auto", minHeight: 44 }} onClick={() => { setReferenceOpen(false); seek(event.endMs); focusCampus(); }} aria-label={`Показать срабатывание объекта ${event.id + 1}`}>
+            <time>{time(event.endMs)}</time><span>Объект {event.id + 1} · {sectorLabels[event.sector]}<small>Условное срабатывание</small></span>
+          </Button>
+        </li>)}</ol>
+      </section>
+      {projectScene && <section className={styles.protectionEvents} aria-label="Журнал нейтрализаций">
+        <Typography.Title level={5}>Журнал нейтрализаций</Typography.Title>
+        <Typography.Paragraph>{frame.intercepts.length ? `Нейтрализовано объектов: ${frame.intercepts.length}. Последние ${Math.min(5, frame.intercepts.length)}:` : "Нейтрализаций пока нет."}</Typography.Paragraph>
+        <ol>{frame.intercepts.slice(0, 5).map(intercept => <li key={intercept.id} data-intercept-event={intercept.id}>
+          <Button style={{ height: "auto", minHeight: 44 }} onClick={() => { setReferenceOpen(false); seek(intercept.tMs); focusCampus(); }} aria-label={`Показать нейтрализацию объекта ${intercept.id + 1}`}>
+            <time>{time(intercept.tMs)}</time><span>Объект {intercept.id + 1} · {sectorLabels[intercept.sector]}<small>{projectScene.placements.find(placement => placement.id == intercept.by)?.name ?? "Условная нейтрализация"}</small></span>
+          </Button>
+        </li>)}</ol>
+      </section>}
+      <section aria-label="Направления входа">
+        <Typography.Title level={5}>Откуда появляются · 360°</Typography.Title>
+        <Typography.Paragraph>У каждого объекта свой угол появления в пределах 360°. Восемь секторов по сторонам света только группируют статистику.</Typography.Paragraph>
+        <dl className={styles.directionStats}>{sectorLabels.map((label, sector) => <div key={label} data-sector={sector}>
+          <dt><i style={{ background: sectorColors[sector] }} aria-hidden />{label}</dt><dd>{summary.sectorCounts[sector]} <small>объектов</small>{aggregate && <small>p90 активных: {aggregate.sectorP90[sector]}</small>}</dd>
+        </div>)}</dl>
+        <Typography.Paragraph>{aggregate ? "Число объектов — выбранный прогон; p90 — квантиль пиков активности в секторе по пакету." : "Количество за весь выбранный прогон. p90 по секторам появится после расчёта пакета."}</Typography.Paragraph>
+      </section>
+      {projectScene && <section aria-label="Конфигурация с карты">
+        <Typography.Title level={5}>{projectScene.name}</Typography.Title>
+        <Typography.Paragraph>Объект и средства используют общее состояние с картой. Для любого выбранного объекта используется стандартная BIM-модель предприятия; контур объекта условный. Модель эффективности — условная ({effectModel.id}): объект, вошедший в условную зону действующего средства, нейтрализован с вероятностью {(effectModel.unitProbability * 100).toFixed(0)}% на одно учитываемое изделие (несколько изделий объединяются: 1−{(effectModel.unitProbability).toFixed(2).slice(1)}^k). Дальности и углы зон — оценки пользователя или значения каталога; это учебные допущения, не подтверждённая эффективность реальных средств.</Typography.Paragraph>
+        <ul>{projectScene.placements.map(object => <li key={object.id}>{object.name} · {object.quantity} шт. · {statusLabels[object.status]} · {object.participates ? `учитывается: ${object.coverageRadiusM} м / ${object.coverageAngleDeg}°` : "не участвует"}</li>)}</ul>
+      </section>}
+      <Typography.Title level={5}>Данные прогона</Typography.Title>
+      <Typography.Paragraph type="secondary">Прогон №{runIndex + 1} · seed {run.seed} · {motionVersion} · сессия сбрасывается при выходе или перезагрузке</Typography.Paragraph>
+    </Modal>
   </section>;
 }

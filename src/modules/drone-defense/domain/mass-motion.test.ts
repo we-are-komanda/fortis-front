@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import data from "../infra/data/scenario/library-v1.json";
-import { generateRun, frameAt, summarizeRun, summarizeBatch, computeBatch, type MotionConfig, sectorAt, protectionRule } from "./mass-motion";
+import { generateRun, frameAt, summarizeRun, summarizeBatch, computeBatch, type MotionConfig, type DefenseUnit, sectorAt, protectionRule } from "./mass-motion";
 import { factoryUnits } from "./factory-campus";
 import { initialClock, transitionClock, clockAt, formatTime, type Library } from "./scenario-playback";
 
@@ -58,9 +58,9 @@ test("exact event sweep handles simultaneous end/start and nearest-rank quantile
   const result = summarizeRun({ objects, durationMs: 20, index: 0, seed: 1 });
   assert.equal(result.peak, 2);
   assert.equal(result.mean, 1.5);
-  assert.deepEqual(result.sectorPeaks, [1, 1, 0, 0, 0, 0, 0, 0]);
-  assert.deepEqual(result.curve, [{ timeMs: 0, active: 1 }, { timeMs: 5, active: 2 }, { timeMs: 10, active: 2 }, { timeMs: 15, active: 1 }, { timeMs: 20, active: 0 }]);
-  assert.deepEqual(summarizeBatch([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(peak => ({ peak, mean: 1, sectorPeaks: Array(8).fill(peak) }))), { min: 1, median: 5, p90: 9, max: 10, meanActive: 1, sectorP90: Array(8).fill(9) });
+  assert.deepEqual(result.sectorPeaks, [1, 1, 0, 0, 0, 0, 0, 0]);  assert.deepEqual(result.curve, [{ timeMs: 0, active: 1 }, { timeMs: 5, active: 2 }, { timeMs: 10, active: 2 }, { timeMs: 15, active: 1 }, { timeMs: 20, active: 0 }]);
+  assert.deepEqual(summarizeBatch([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(peak => ({ peak, mean: 1, sectorPeaks: Array(8).fill(peak), neutralizedRate: peak / 10 }))),
+    { min: 1, median: 5, p90: 9, max: 10, meanActive: 1, sectorP90: Array(8).fill(9), neutralizedRates: { min: .1, median: .5, p90: .9, max: 1 } });
 });
 test("batch uses the same runs, reports completion and supports cancellation", async () => {
   const progress: number[] = [];
@@ -145,4 +145,63 @@ test("sector event peaks match direct state counts", () => {
     counts.forEach((count, sector) => peaks[sector] = Math.max(peaks[sector], count));
   }
   assert.deepEqual(summary.sectorPeaks, peaks);
+});
+
+const originUnit = (quantity = 1): DefenseUnit => ({ id: "u1", xM: 0, yM: 0, radiusM: 1000, angleDeg: 360, rotationDeg: 0, quantity });
+test("coverage draws are deterministic, per-object and independent of coverage config", () => {
+  assert.deepEqual(generateRun(config, library, 3, protectionRule.radiusM, [originUnit()]), generateRun(config, library, 3, protectionRule.radiusM, [originUnit()]));
+  // Routes never depend on placed coverage: timings and geometry stay identical.
+  const without = generateRun(config, library, 3), withUnit = generateRun(config, library, 3, protectionRule.radiusM, [originUnit()]);
+  assert.deepEqual(without.objects.map(o => ({ id: o.id, bearingDeg: o.bearingDeg, sector: o.sector, start: o.start, end: o.end, startMs: o.startMs, endMs: o.endMs, durationMs: o.durationMs })),
+    withUnit.objects.map(o => ({ id: o.id, bearingDeg: o.bearingDeg, sector: o.sector, start: o.start, end: o.end, startMs: o.startMs, endMs: o.endMs, durationMs: o.durationMs })));
+});
+test("neutralized objects stop at coverage entry and never reach the boundary", () => {
+  const base = generateRun(config, library, 5, protectionRule.radiusM, []);
+  const run = generateRun(config, library, 5, protectionRule.radiusM, [originUnit()]);
+  const neutralizedObjects = run.objects.filter(object => object.neutralized !== undefined);
+  assert.ok(neutralizedObjects.length > 0 && neutralizedObjects.length < run.objects.length, String(neutralizedObjects.length));
+  for (const object of neutralizedObjects) {
+    // Unit sits on the shared radial line, so entry fraction is the radius ratio along the path.
+    const fraction = object.neutralized!.atMs - object.startMs === 0 ? 0 : (object.neutralized!.atMs - object.startMs) / object.durationMs;
+    assert.ok(Number.isFinite(fraction) && fraction >= 0 && fraction < 1);
+    assert.ok(Math.abs(Math.hypot(object.neutralized!.xM, object.neutralized!.yM) - (10000 - fraction * (10000 - protectionRule.radiusM))) < 1e-6);
+    assert.ok(Math.abs(Math.hypot(object.neutralized!.xM, object.neutralized!.yM) - 1000) < 1e-6);
+    const frame = frameAt(run, object.neutralized!.atMs);
+    assert.ok(frame.intercepts.some(marker => marker.id === object.id && marker.neutralized && marker.by === "u1"));
+    assert.ok(!frame.markers.some(marker => marker.id === object.id));
+    assert.ok(!frame.events.some(event => event.id === object.id));
+  }
+  assert.ok(base.objects.every(object => object.neutralized === undefined));
+  const last = neutralizedObjects.at(-1)!;
+  assert.ok(!frameAt(run, last.neutralized!.atMs - 1).intercepts.some(marker => marker.id === last.id));
+  for (const t of [0, run.durationMs / 2, run.durationMs]) {
+    const frame = frameAt(run, t);
+    assert.equal(frame.waiting + frame.markers.length + frame.finished + frame.neutralized, run.objects.length);
+  }
+});
+test("more covering units can only raise neutralization; sectors and quantities gate the outcome", () => {
+  const base = new Set(generateRun(config, library, 9, protectionRule.radiusM, [originUnit()]).objects.filter(object => object.neutralized !== undefined).map(object => object.id));
+  const stronger = new Set(generateRun(config, library, 9, protectionRule.radiusM, [originUnit(), { id: "u2", xM: 0, yM: 0, radiusM: 1000, angleDeg: 360, rotationDeg: 0, quantity: 3 }]).objects.filter(object => object.neutralized !== undefined).map(object => object.id));
+  assert.ok(stronger.size >= base.size && [...base].every(id => stronger.has(id)), `${base.size} -> ${stronger.size}`);
+  assert.ok(base.size > 0 && stronger.size > base.size);
+  // Conditional zone: only objects whose approach line crosses the north-facing sector can be covered.
+  const sectorUnit: DefenseUnit = { id: "s1", xM: 0, yM: 0, radiusM: 1000, angleDeg: 90, rotationDeg: 0, quantity: 1 };
+  const sectorRun = generateRun(config, library, 11, protectionRule.radiusM, [sectorUnit]);
+  for (const object of sectorRun.objects.filter(object => object.neutralized !== undefined)) {
+    const diff = Math.abs(((object.bearingDeg + 540) % 360) - 180);
+    assert.ok(diff <= 45, `${object.bearingDeg}`);
+  }
+  assert.ok(sectorRun.objects.some(object => object.neutralized !== undefined));
+});
+test("defense unit validation rejects broken configurations", () => {
+  for (const unit of [{ id: "", xM: 0, yM: 0, radiusM: 100, angleDeg: 360, rotationDeg: 0, quantity: 1 },
+    { id: "u", xM: NaN, yM: 0, radiusM: 100, angleDeg: 360, rotationDeg: 0, quantity: 1 },
+    { id: "u", xM: 0, yM: 0, radiusM: 0, angleDeg: 360, rotationDeg: 0, quantity: 1 },
+    { id: "u", xM: 0, yM: 0, radiusM: 100, angleDeg: 0, rotationDeg: 0, quantity: 1 },
+    { id: "u", xM: 0, yM: 0, radiusM: 100, angleDeg: 400, rotationDeg: 0, quantity: 1 },
+    { id: "u", xM: 0, yM: 0, radiusM: 100, angleDeg: 360, rotationDeg: 0, quantity: 0 },
+    { id: "u", xM: 0, yM: 0, radiusM: 100, angleDeg: 360, rotationDeg: 0, quantity: 1.5 }]) {
+    assert.throws(() => generateRun(config, library, 0, protectionRule.radiusM, [unit as DefenseUnit]));
+  }
+  assert.throws(() => generateRun(config, library, 0, protectionRule.radiusM, [originUnit(), originUnit()]));
 });

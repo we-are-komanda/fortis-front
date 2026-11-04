@@ -2041,3 +2041,8 @@
     justify-content: start;
   }
 }
+
+@media (max-width: 1023px) {
+  .prototypeLayerPanelWrap { max-height: calc(100% - 11rem); }
+  .prototypeLayerPanel { min-height: 0; overflow-y: auto; }
+}

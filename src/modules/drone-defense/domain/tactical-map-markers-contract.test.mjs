@@ -9,7 +9,7 @@ const markerSource = readFileSync("src/modules/drone-defense/ui/map-object-marke
 
 assert(!gisBoardSource.includes("new IconLayer<BuiltPlacementIcon>"), "Default map object markers must not use bitmap IconLayer previews");
 assert(gisBoardSource.includes("<MapObjectMarker"), "GisBoard must render tactical MapObjectMarker overlay markers");
-assert(markerSource.includes("ASSET_CATEGORY_COLORS"), "MapObjectMarker must define category colors");
+assert(markerSource.includes("<DefenseAssetSymbol"), "MapObjectMarker must use the shared documented tactical symbol");
 assert(markerSource.includes("MapMarkerState"), "MapObjectMarker must support marker states");
 assert(markerSource.includes("getAssetMarkerIcon"), "MapObjectMarker must map assets to pictograms");
 assert(markerSource.includes("shouldShowLabel"), "MapObjectMarker must hide labels except selected, hovered, or close zoom");

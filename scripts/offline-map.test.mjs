@@ -26,7 +26,7 @@ test("offline map is complete, bounded and contains no remote style dependencies
     }
   }
   // Both the bundled legacy demo and the current workspace object must have coverage.
-  for (const [lon, lat] of [[37.1, 55.1], [40, 55]]) {
+  for (const [lon, lat] of [[37.1, 55.1], [174.7762, -41.2865]]) {
     assert.ok(regions.some(({ bounds: [w, s, e, n] }) => lon >= w && lon <= e && lat >= s && lat <= n));
   }
   const tileCount = Object.keys(manifest.files).filter(path => path.startsWith("tiles/")).length;

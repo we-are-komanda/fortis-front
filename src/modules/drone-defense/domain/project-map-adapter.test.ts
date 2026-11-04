@@ -1,8 +1,8 @@
+import { createLegacyDefenseProject as createDefaultDefenseProject } from "../../../../test/fixtures/legacy-defense-project";
 // Run: npx tsx src/modules/drone-defense/domain/project-map-adapter.test.ts
 
 import {
   applyAssetQuantityDraftsToProject,
-  createDefaultDefenseProject,
   placeObjectInProject,
   updateLayerGeometryFromRadii,
   updatePlacedObjectInProject,

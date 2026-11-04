@@ -6,10 +6,9 @@ import { withBasePath } from "@/shared/lib/base-path";
 import type { DefenseAssetLibraryItem } from "@/shared/types/defense-project";
 import type {
   DragEvent as ReactDragEvent,
-  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 
 const DRAG_THRESHOLD = 6; // px before we commit to drag mode
 
@@ -44,13 +43,11 @@ export type DefenseToolIconProps = {
   maxQuantity: number;
   disabledReason?: string;
   canRemove?: boolean;
-  isPlaceholder?: boolean;
   isSelected?: boolean;
   onSelect: () => void;
   onOpenCoordinates: () => void;
   onDragAsset: (event: ReactDragEvent<HTMLDivElement>) => void;
   onPointerDragAsset: (event: ReactPointerEvent<HTMLDivElement>) => void;
-  onMouseDragAsset: (event: ReactMouseEvent<HTMLDivElement>) => void;
   onRemove: () => void;
 };
 
@@ -68,13 +65,11 @@ export function DefenseToolIcon({
   installedCount,
   maxQuantity,
   disabledReason,
-  isPlaceholder = false,
   isSelected = false,
   onSelect,
   onOpenCoordinates,
   onDragAsset,
   onPointerDragAsset,
-  onMouseDragAsset,
 }: DefenseToolIconProps & { assetId: string }) {
   const canAdd = !disabledReason;
   const isZoneObject = placementType === "zone-object";
@@ -97,6 +92,9 @@ export function DefenseToolIcon({
     .join(", ");
 
   const rootRef = useRef<HTMLDivElement>(null);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const suppressClickRef = useRef(false);
+  useEffect(() => () => dragCleanupRef.current?.(), []);
   const ghostRef = useRef<HTMLDivElement | null>(null);
   const infoRef = useRef<AssetInfo>({ title: "", imageUrl: "" });
   infoRef.current = { title: `${name}\n${coverageLabel}`, imageUrl: withBasePath(previewImageUrl) };
@@ -164,6 +162,8 @@ export function DefenseToolIcon({
     const target = event.target as HTMLElement;
     if (isControlTarget(target)) return;
 
+    dragCleanupRef.current?.();
+    suppressClickRef.current = false;
     const startClientX = event.clientX;
     const startClientY = event.clientY;
     let dragging = false;
@@ -171,6 +171,8 @@ export function DefenseToolIcon({
     const onMove = (ev: globalThis.PointerEvent) => {
       if (!dragging && Math.hypot(ev.clientX - startClientX, ev.clientY - startClientY) >= DRAG_THRESHOLD) {
         dragging = true;
+        suppressClickRef.current = true;
+        if (rootRef.current?.hasPointerCapture(event.pointerId)) rootRef.current.releasePointerCapture(event.pointerId);
         createGhost(ev.clientX, ev.clientY);
         onPointerDragAsset(event);
       }
@@ -180,11 +182,15 @@ export function DefenseToolIcon({
     };
 
     const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("pointercancel", onUp, true);
+      dragCleanupRef.current = null;
       destroyGhost();
     };
 
+    dragCleanupRef.current = onUp;
+    window.addEventListener("pointercancel", onUp, { capture: true });
     window.addEventListener("pointermove", onMove, { capture: true });
     window.addEventListener("pointerup", onUp, { capture: true });
   };
@@ -202,7 +208,7 @@ export function DefenseToolIcon({
           : disabledReason
             ? "border-slate-200 bg-slate-50 opacity-65 cursor-not-allowed"
             : "border-slate-200 hover:border-blue-300 hover:shadow-md hover:shadow-blue-900/10"
-      } ${canDrag ? "cursor-grab active:cursor-grabbing" : ""}`}
+      } ${canDrag ? "touch-none cursor-grab active:cursor-grabbing" : ""}`}
       data-placement-type={placementType}
       data-can-drag={canDrag ? "true" : "false"}
       data-testid={`defense-tool-card-${assetId}`}
@@ -213,6 +219,8 @@ export function DefenseToolIcon({
       title={title}
       draggable={canDrag}
       onDragStart={(event) => {
+        dragCleanupRef.current?.();
+        suppressClickRef.current = true;
         if (!canDrag) {
           event.preventDefault();
           return;
@@ -220,10 +228,7 @@ export function DefenseToolIcon({
         onDragAsset(event);
       }}
       onPointerDown={handlePointerDown}
-      onMouseDown={(event) => {
-        if (canDrag) onMouseDragAsset(event);
-      }}
-      onClick={onSelect}
+      onClick={() => { if (!suppressClickRef.current) onSelect(); }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -242,7 +247,7 @@ export function DefenseToolIcon({
           width={56}
           height={56}
           unoptimized
-          className={`h-full w-full object-cover ${isPlaceholder ? "object-contain p-2" : ""}`}
+          className="h-full w-full object-cover"
           draggable={false}
         />
       </span>

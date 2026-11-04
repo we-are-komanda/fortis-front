@@ -1,7 +1,8 @@
+import { createLegacyDefenseProject as createDefaultDefenseProject } from "../../../test/fixtures/legacy-defense-project";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import original from "../../../test/fixtures/frc04-project.json";
-import { createDefaultDefenseProject, importDefenseProjectJson } from "./defense-project";
+import { importDefenseProjectJson } from "./defense-project";
 import type { DefenseProject } from "@/shared/types/defense-project";
 import { useDefenseProjectStore as store } from "./use-defense-project-store";
 
@@ -35,6 +36,20 @@ test("missing catalog entries do not erase sources from a saved project",async()
  await store.getState().refreshAssetLibrary({loader:async()=>[]});
  assert.equal(store.getState().project,project);
  assert.equal(store.getState().assetLibraryPreview,null);
+ assert.deepEqual(store.getState().availableCatalog, {projectId: project.projectId, assetIds: []});
+});
+
+test("replacement catalog hides retired cards without deleting historical project data", async () => {
+ const project={...structuredClone(original),projectId:"historical",source:"backend",version:7} as DefenseProject;
+ store.setState({...store.getInitialState(),project,runtimeMode:"workspace",hydrated:true},true);
+ const replacement={...project.assetLibrary[0],id:"replacement",name:"New catalog item"};
+ await store.getState().refreshAssetLibrary({loader:async()=>[replacement]});
+ assert.deepEqual(store.getState().availableCatalog,{projectId:"historical",assetIds:["replacement"]});
+ assert.equal(store.getState().project,project);
+ assert.equal(store.getState().applyAssetLibraryPreview(),true);
+ assert.ok(store.getState().project.assetLibrary.some(asset=>asset.id===project.assetLibrary[0].id));
+ assert.deepEqual(store.getState().project.placedObjects,project.placedObjects);
+ assert.equal(store.getState().project.version,7);
 });
 
 test("saving a catalog card then selecting it keeps an applicable preview",()=>{

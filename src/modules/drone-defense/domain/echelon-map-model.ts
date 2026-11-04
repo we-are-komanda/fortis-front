@@ -38,6 +38,7 @@ export type EchelonMapPlacement = {
   catalogGroupId?: string;
   iconUrl?: string;
   markerCategory?: string;
+  markerAssetId?: string;
   qty: number;
 };
 
@@ -56,6 +57,7 @@ export type EchelonMapSlot = {
 export type LayerFocusViewState = MapViewState;
 
 export type MapScaleBar = {
+  denominator: number;
   distanceM: number;
   label: string;
   widthPx: number;
@@ -246,6 +248,15 @@ function zoomForRadius({ latitude, radiusM, targetDiameterPx }: { latitude: numb
   return Math.log2((earthCircumferenceM * latitudeScale) / (metersPerPixel * webMercatorTileSizePx));
 }
 
+// Nominal screen scale uses CSS's reference pixel (96 px per inch).
+export function buildProtectedObjectWorkingViewState(facility: Facility): LayerFocusViewState {
+  const metersPerPixel = 100 * .0254 / 96;
+  const latitudeScale = Math.cos(facility.center.lat * Math.PI / 180);
+  return { longitude: facility.center.lon, latitude: facility.center.lat,
+    zoom: Math.log2(earthCircumferenceM * latitudeScale / (webMercatorTileSizePx * metersPerPixel)),
+    pitch: 0, bearing: 0 };
+}
+
 export function buildProtectedObjectInitialViewState({
   facility,
   layers,
@@ -282,7 +293,7 @@ function formatScaleDistance(distanceM: number) {
   if (distanceM >= 1000) {
     return `${(distanceM / 1000).toLocaleString("ru-RU", { maximumFractionDigits: 1 })} км`;
   }
-  return `${Math.round(distanceM).toLocaleString("ru-RU")} м`;
+  return `${distanceM.toLocaleString("ru-RU", { maximumFractionDigits: 2 })} м`;
 }
 
 function niceScaleDistance(distanceM: number) {
@@ -302,13 +313,14 @@ export function buildMapScaleBar({
   zoom: number | undefined;
   maxWidthPx?: number;
 }): MapScaleBar {
-  const latitudeScale = Math.max(0.2, Math.cos(latitude * (Math.PI / 180)));
-  const normalizedZoom = clamp(zoom ?? minLayerFocusZoom, minLayerFocusZoom, maxLayerFocusZoom);
+  const latitudeScale = Math.cos(latitude * (Math.PI / 180));
+  const normalizedZoom = clamp(zoom ?? minLayerFocusZoom, minLayerFocusZoom, 24);
   const metersPerPixel = (earthCircumferenceM * latitudeScale) / (2 ** normalizedZoom * webMercatorTileSizePx);
   const distanceM = niceScaleDistance(metersPerPixel * maxWidthPx);
   const widthPx = clamp(distanceM / metersPerPixel, 44, maxWidthPx);
 
   return {
+    denominator: Math.round(metersPerPixel / (.0254 / 96)),
     distanceM,
     label: formatScaleDistance(distanceM),
     widthPx: Number(widthPx.toFixed(1)),
@@ -479,6 +491,7 @@ export function buildEchelonMapModel({
           catalogGroupId: placement.catalogGroupId,
           iconUrl: placement.iconUrl,
           markerCategory: placement.markerCategory,
+          markerAssetId: placement.markerAssetId,
           qty: placement.qty,
         };
       })

@@ -63,7 +63,7 @@ import { useMapViewStore } from "@/shared/lib/use-map-view-store";
 import type { LayerInsertOption } from "@/shared/lib/defense-project";
 import type { DefenseLayer, DefenseLayerId } from "@/shared/types/drone-defense";
 import type { Coordinates, ProtectedObjectOption } from "@/shared/types/defense-project";
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
+import type { DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent } from "react";
 
 const defenseAssetDragMimeType = "application/x-fortis-defense-asset";
 
@@ -138,7 +138,7 @@ function layerWizardStoreDraft(draft: LayerWizardDraft) {
 }
 
 const ScenarioWorkspace = dynamic(() => import("./scenario/scenario-workspace"), {
-  loading: () => <p role="status">Загрузка учебной площадки…</p>,
+  loading: () => <p role="status">Загрузка моделирования…</p>,
 });
 const FacilityDrilldown = dynamic(() => import("./facility-drilldown").then(module => module.FacilityDrilldown), {
   loading: () => <p role="status">Загрузка 3D-вида…</p>,
@@ -149,8 +149,32 @@ const FactoryBimViewer = dynamic(() => import("./factory-bim-viewer").then(modul
 
 export function DroneDefensePrototype() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const runtimeMode = useRuntimeMode();
+  const backendProjectId = searchParams.get("projectId") ?? searchParams.get("project");
+  const requestedObjectId = searchParams.get("objectId");
+  const project = useDefenseProjectStore(state => state.project);
+  const hydrated = useDefenseProjectStore(state => state.hydrated);
+  const loadStatus = useDefenseVariantsStore(state => state.loadStatus);
+  const loadError = useDefenseVariantsStore(state => state.error);
+  useEffect(() => {
+    if (!runtimeMode) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    useDefenseProjectStore.getState().setRuntimeMode(runtimeMode);
+    void (async () => {
+      if (backendProjectId && runtimeMode === "workspace") {
+        if (!shouldLoadBackendProject(backendProjectId)) return;
+        await useDefenseVariantsStore.getState().loadVariant(backendProjectId, controller.signal);
+        if (cancelled || useDefenseVariantsStore.getState().loadStatus === "error") return;
+      } else {
+        useDefenseProjectStore.getState().restoreProjectFromLocalStorage();
+      }
+      if (cancelled) return;
+      void useDefenseProjectStore.getState().refreshAssetLibrary({ isPublic: true, limit: 100 });
+      void useDefenseProjectStore.getState().refreshProtectedObjects({ limit: 100 });
+    })();
+    return () => { cancelled = true; controller.abort(); };
+  }, [runtimeMode, backendProjectId]);
   const scenario = searchParams.get("view") === "scenario-modeling";
   const factory = searchParams.get("view") === "3d";
   const mapVisible = !scenario && !factory;
@@ -162,20 +186,23 @@ export function DroneDefensePrototype() {
     if (!mapVisited) setMapVisited(true);
     if (mapQuery !== searchParams.toString()) setMapQuery(searchParams.toString());
   }
-  // Keep the existing GIS instance and its camera/selection; direct scenario entry never initializes a project.
+  // Keep the GIS camera and placement tools mounted; both views read the same project store.
   return <>
     {mapVisited && <div hidden={!mapVisible} className="h-full min-h-0"><ProjectPrototype query={mapQuery} /></div>}
     {factory && <FactoryBimViewer returnHref={`/prototype?${returnParams.toString()}`}/>}
     {scenario && (runtimeMode === null ? <p role="status">Проверка режима…</p> :
-      canOpenCapability("scenarios", runtimeMode) ? <ScenarioWorkspace onExit={() => router.push(`/prototype?${mapQuery || "view=gis"}`, { scroll: false })} /> : <CapabilityNotice capability="scenarios" />)}
+      canOpenCapability("scenarios", runtimeMode) ? (
+        backendProjectId && loadStatus === "error" ? <p role="alert">{loadError}</p> :
+        !hydrated || (backendProjectId && (loadStatus === "loading" || project.projectId !== backendProjectId)) ? <p role="status">Загрузка проекта…</p> :
+        requestedObjectId && requestedObjectId !== project.baseObject.id ? <p role="alert">Выберите объект на карте и перейдите к Монте-Карло. Несохранённая конфигурация не восстанавливается после перезагрузки.</p> :
+        <ScenarioWorkspace project={project.baseObject.id === "local-draft" && !requestedObjectId && !mapVisited ? undefined : project} />
+      ) : <CapabilityNotice capability="scenarios" />)}
   </>;
 }
 
 function ProjectPrototype({ query }: { query: string }) {
-  const searchParams = new URLSearchParams(query);
+  const router = useRouter();
   const runtimeMode = useRuntimeMode();
-  const backendProjectId = searchParams.get("projectId") ?? searchParams.get("project");
-  const loadVariant = useDefenseVariantsStore((state) => state.loadVariant);
   const variantError = useDefenseVariantsStore((state) => state.error);
   const syncStatus = useDefenseProjectStore((state) => state.syncStatus);
   const protectedObjectsError = useDefenseProjectStore((state) => state.protectedObjectsError);
@@ -235,39 +262,19 @@ function ProjectPrototype({ query }: { query: string }) {
     setPlacedObjectMapVisibility,
     deletePlacedObject,
     validateObjectPlacement,
-    restoreProjectFromLocalStorage,
     assetLibraryLoading,
     assetLibraryError,
+    availableCatalog,
     refreshAssetLibrary,
     assetLibraryPreview, applyAssetLibraryPreview,
     protectedObjects,
-    refreshProtectedObjects,
   } = useDefenseProjectStore();
 
   useEffect(() => {
     if (runtimeMode) void init(runtimeMode);
   }, [init, runtimeMode]);
 
-  useEffect(() => {
-    if (!runtimeMode) return;
-    let cancelled = false;
-    const controller = new AbortController();
-    useDefenseProjectStore.getState().setRuntimeMode(runtimeMode);
-    restoreMapViewFromLocalStorage();
-    void (async () => {
-      if (backendProjectId && runtimeMode === "workspace") {
-        if (!shouldLoadBackendProject(backendProjectId)) return;
-        await loadVariant(backendProjectId, controller.signal);
-        if (cancelled || useDefenseVariantsStore.getState().loadStatus === "error") return;
-      } else {
-        restoreProjectFromLocalStorage();
-      }
-      if (cancelled) return;
-      void refreshAssetLibrary({ isPublic: true, limit: 100 });
-      void refreshProtectedObjects({ limit: 100 });
-    })();
-    return () => { cancelled = true; controller.abort(); };
-  }, [runtimeMode, backendProjectId, loadVariant, refreshAssetLibrary, refreshProtectedObjects, restoreMapViewFromLocalStorage, restoreProjectFromLocalStorage]);
+  useEffect(() => { restoreMapViewFromLocalStorage(); }, [restoreMapViewFromLocalStorage]);
   const selectedProtectedObject = useMemo(
     () =>
       protectedObjects.find((item) => item.id === project.baseObject.id) ?? {
@@ -314,8 +321,9 @@ function ProjectPrototype({ query }: { query: string }) {
     if (assetLibraryPreview?.baseProject === project) applyAssetLibraryPreview();
   }, [assetLibraryPreview, project, applyAssetLibraryPreview]);
   const assetCatalogItems = useMemo(
-    () => getAssetCatalogItems(project, selectedLayer?.code, project.placedObjects),
-    [project, selectedLayer?.code],
+    () => getAssetCatalogItems(project, selectedLayer?.code, project.placedObjects)
+      .filter(item => availableCatalog?.projectId === project.projectId && availableCatalog.assetIds.includes(item.assetId)),
+    [project, selectedLayer?.code, availableCatalog],
   );
   const filteredCatalogItems = useMemo(() => {
     const query = catalogQuery.trim().toLowerCase();
@@ -660,12 +668,20 @@ function ProjectPrototype({ query }: { query: string }) {
     setLastPlacementMessage(`${asset?.name ?? object.name ?? "Объект"} выбран на карте`);
   };
 
+  const requirePlacementLayer = () => {
+    if (selectedLayer) return true;
+    createProjectLayer();
+    setLastPlacementMessage("Сначала создайте эшелон, затем разместите выбранное средство на карте.");
+    return false;
+  };
+
   const handleSelectTool = (asset: ReturnType<typeof getAssetCatalogItems>[number]) => {
     const nextId = activeToolId === asset.assetId ? null : asset.assetId;
     setActiveToolId(nextId);
     selectAsset(asset.assetId);
     setCoordinatePlacementAssetId(null);
     setCoordinatePlacementValidation(null);
+    if (nextId && !requirePlacementLayer()) return;
     setLastPlacementMessage(
       nextId
         ? `${selectedLayer?.code ?? "—"} · ${asset.title}: кликните по карте внутри активного эшелона`
@@ -674,10 +690,7 @@ function ProjectPrototype({ query }: { query: string }) {
   };
 
   const openCoordinatePlacement = (asset: AssetCatalogItem) => {
-    if (!selectedLayer) {
-      setLastPlacementMessage("Выберите эшелон для размещения.");
-      return;
-    }
+    if (!requirePlacementLayer() || !selectedLayer) return;
     setActiveToolId(asset.assetId);
     selectAsset(asset.assetId);
     setCoordinatePlacementAssetId(asset.assetId);
@@ -687,7 +700,7 @@ function ProjectPrototype({ query }: { query: string }) {
   };
 
   const placeActiveToolAtCoordinate = ({ lng, lat }: { lng: number; lat: number }) => {
-    if (!activeToolId || !selectedLayer) return;
+    if (!activeToolId || !requirePlacementLayer() || !selectedLayer) return;
     const asset = project.assetLibrary.find((item) => item.id === activeToolId);
     if (!asset) {
       setLastPlacementMessage("Средство защиты не найдено в библиотеке");
@@ -707,7 +720,6 @@ function ProjectPrototype({ query }: { query: string }) {
   const placeDroppedAssetOnMap = (args: {
     groupId: string;
     layerId: DefenseLayerId;
-    slotId: string;
     mapRef: { lon: number; lat: number };
   }) => {
     const asset =
@@ -717,6 +729,9 @@ function ProjectPrototype({ query }: { query: string }) {
       setLastPlacementMessage("Средство защиты не найдено в библиотеке");
       return;
     }
+    setActiveToolId(asset.id);
+    setPointerDraggedAssetId(null);
+    if (!requirePlacementLayer()) return;
     const compoundProfile = buildPlacedDefenseCompoundProfile(asset);
     const validation = placeObject(asset.id, args.layerId, { lat: args.mapRef.lat, lng: args.mapRef.lon }, compoundProfile ? { compoundProfile } : undefined);
     if (!validation.isValid) {
@@ -724,7 +739,7 @@ function ProjectPrototype({ query }: { query: string }) {
       return;
     }
     setActiveToolId(asset.id);
-    setSelectedSlotId(args.slotId);
+    setSelectedSlotId(null);
     setPointerDraggedAssetId(null);
     setCoordinatePlacementAssetId(null);
     setCoordinatePlacementValidation(null);
@@ -765,16 +780,6 @@ function ProjectPrototype({ query }: { query: string }) {
   };
 
   const startAssetPointerDrag = (asset: AssetCatalogItem, event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) return;
-    setPointerDraggedAssetId(asset.assetId);
-    setActiveToolId(asset.assetId);
-    selectAsset(asset.assetId);
-    setCoordinatePlacementAssetId(null);
-    setCoordinatePlacementValidation(null);
-    setLastPlacementMessage(`${asset.title}: перетащите карточку на карту`);
-  };
-
-  const startAssetMouseDrag = (asset: AssetCatalogItem, event: ReactMouseEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     setPointerDraggedAssetId(asset.assetId);
     setActiveToolId(asset.assetId);
@@ -959,7 +964,6 @@ function ProjectPrototype({ query }: { query: string }) {
                 onOpenCoordinates={openCoordinatePlacement}
                 onDragAsset={startAssetDrag}
                 onPointerDragAsset={startAssetPointerDrag}
-                onMouseDragAsset={startAssetMouseDrag}
                 onRemoveTool={(asset) => removeCatalogAsset(asset.assetId)}
               />
             </div>
@@ -1033,6 +1037,12 @@ function ProjectPrototype({ query }: { query: string }) {
               className="h-full min-h-0 rounded-none border-0"
               facilities={mapFacilities}
               selectedFacilityId={project.baseObject.id}
+              onOpenModeling={runtimeMode && canOpenCapability("scenarios", runtimeMode) ? () => {
+                const params = new URLSearchParams(query);
+                params.set("view", "scenario-modeling");
+                params.set("objectId", project.baseObject.id);
+                router.push(`/prototype?${params.toString()}`, { scroll: false });
+              } : undefined}
               onSelectFacility={(nextId) => {
                 const nextObject = protectedObjects.find((item) => item.id === nextId);
                 if (!nextObject) return;
@@ -1049,6 +1059,7 @@ function ProjectPrototype({ query }: { query: string }) {
               selectedLayerId={selectedLayerId}
               selectedSlotId={selectedSlotId}
               activeToolId={activeToolId}
+              draggedAssetId={pointerDraggedAssetId}
               baseMapSourceId={currentBaseMapSourceId}
               placementHint={placementHint}
               onSelectBaseMapSource={setBaseMapSource}

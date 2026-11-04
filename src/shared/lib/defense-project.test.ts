@@ -1,7 +1,7 @@
+import { createLegacyDefenseProject as createDefaultDefenseProject } from "../../../test/fixtures/legacy-defense-project";
 // Run: npx tsx src/shared/lib/defense-project.test.ts
 
 import {
-  createDefaultDefenseProject,
   calculateProjectTotalCost,
   calculateProjectTotalUnits,
   calculateLayerSummaries,
@@ -15,7 +15,6 @@ import {
   duplicatePlacedObjectInProject,
   exportDefenseProjectJson,
   importDefenseProjectJson,
-  legacySelectedConfigurationToProject,
   movePlacedObjectInProject,
   transferPlacedObjectToLayerInProject,
   placeObjectInProject,
@@ -35,7 +34,6 @@ import {
   validateLayerGeometry,
   validateObjectPlacement,
 } from "@/shared/lib/defense-project";
-import { createEmptyConfiguration, setDefenseItemQuantityInConfiguration } from "@/shared/lib/defense-configuration";
 import type { DefenseAsset } from "@/shared/types/defense-project";
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -67,7 +65,7 @@ assert(
   "shared asset catalog must allow every asset in the active layer",
 );
 assert(
-  l2CatalogItems.every((item) => !item.compatibilityLabel && item.compatibilityStatus === "compatible"),
+  l2CatalogItems.every((item) => !item.compatibilityLabel),
   "shared asset catalog must not expose user-facing recommendation or compatibility labels",
 );
 assert(
@@ -80,7 +78,7 @@ assert(
 );
 const radarInL3 = getAssetCatalogItems(project, "L3", project.placedObjects).find((item) => item.assetId === "mobile-radar");
 assert(
-  radarInL3?.compatibilityStatus === "compatible" && radarInL3.canPlaceInActiveLayer,
+  !radarInL3?.compatibilityLabel && radarInL3?.canPlaceInActiveLayer,
   "active-layer catalog must allow formerly recommended assets without recommendation copy",
 );
 const ewOnL2 = l2CatalogItems.find((item) => item.assetId === "ew-narrowband");
@@ -399,15 +397,9 @@ assert(
   "project JSON import must backfill canonical asset display fields",
 );
 assert(
-  importedLegacyAssets.assetLibrary.every((asset) => asset.coverageType !== "none" || asset.coverageRadius === undefined),
-  "project JSON import must prefer canonical coverage data over stale stored asset fields",
+  importedLegacyAssets.assetLibrary.every((asset) => asset.coverageType === "none") &&
+    importedLegacyAssets.assetLibrary.find((asset) => asset.id === "l1-osint")?.coverageRadius === 1200,
+  "project JSON import must preserve stored values without inferring coverage from the current catalog",
 );
-
-let legacy = createEmptyConfiguration();
-legacy = setDefenseItemQuantityInConfiguration(legacy, "mobile-radar", 2);
-const migrated = legacySelectedConfigurationToProject(legacy);
-assert(migrated.placedObjects.length === 1, "legacy selectedItems must migrate into aggregate draft objects");
-assert(migrated.placedObjects[0].quantity === 2, "legacy aggregate draft object must preserve quantity");
-assert(projectToCalculatorConfiguration(migrated).lines.some((line) => line.assetId === "mobile-radar" && line.quantity === 2), "migrated project must calculate like legacy config");
 
 console.log("defense-project.test.ts: project domain contracts passed");

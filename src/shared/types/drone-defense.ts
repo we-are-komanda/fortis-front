@@ -111,6 +111,7 @@ export type Placement = {
   catalogGroupName?: string;
   iconUrl?: string;
   markerCategory?: string;
+  markerAssetId?: string;
   slotId?: string;
   mapRef?: GeoPoint;
   qty: number;

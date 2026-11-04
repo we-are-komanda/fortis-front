@@ -6,7 +6,6 @@ import type { AssetCatalogItem } from "@/shared/lib/defense-project";
 import type { DefenseProject } from "@/shared/types/defense-project";
 import type {
   DragEvent as ReactDragEvent,
-  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
 
@@ -19,7 +18,6 @@ type DefenseToolsPanelProps = {
   onOpenCoordinates: (asset: AssetCatalogItem) => void;
   onDragAsset: (asset: AssetCatalogItem, event: ReactDragEvent<HTMLDivElement>) => void;
   onPointerDragAsset: (asset: AssetCatalogItem, event: ReactPointerEvent<HTMLDivElement>) => void;
-  onMouseDragAsset: (asset: AssetCatalogItem, event: ReactMouseEvent<HTMLDivElement>) => void;
   onRemoveTool: (asset: AssetCatalogItem) => void;
 };
 
@@ -32,7 +30,6 @@ export function DefenseToolsPanel({
   onOpenCoordinates,
   onDragAsset,
   onPointerDragAsset,
-  onMouseDragAsset,
   onRemoveTool,
 }: DefenseToolsPanelProps) {
   if (assets.length === 0) {
@@ -73,13 +70,11 @@ export function DefenseToolsPanel({
             maxQuantity={assetItem.maxQuantity}
             disabledReason={disabledReason}
             canRemove={assetItem.assetId === selectedObjectAssetId}
-            isPlaceholder={buildAsset?.isPlaceholder ?? !primaryGroupId}
             isSelected={selectedToolId === assetItem.assetId}
             onSelect={() => onSelectTool(assetItem)}
             onOpenCoordinates={() => onOpenCoordinates(assetItem)}
             onDragAsset={(event) => onDragAsset(assetItem, event)}
             onPointerDragAsset={(event) => onPointerDragAsset(assetItem, event)}
-            onMouseDragAsset={(event) => onMouseDragAsset(assetItem, event)}
             onRemove={() => onRemoveTool(assetItem)}
           />
         );
