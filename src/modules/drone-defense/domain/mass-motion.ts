@@ -1,12 +1,48 @@
 import { DURATION_MS, validateLibrary, type Library, type Sample } from "./scenario-playback";
 import { factoryCampusSize } from "./factory-campus";
 
-export const motionVersion = "mass-motion@4";
+export const motionVersion = "mass-motion@5";
 // A schematic training boundary around the whole campus, not equipment coverage.
 export const protectionRule = { id: "training-boundary@1", radiusM: factoryCampusSize, signalDurationMs: 60000 } as const;
+// Individual kill-probability parameters per asset (see ADR-0032, E2).
+// pPass = probability the drone passes undamaged through one encounter with this asset.
+// Values are analytical assumptions derived from effective engagement zones and known system
+// characteristics (catalog: Каталог_АО_ССТ_2026-11-03.md).
+// Future: effectiveRadiusMultiplier enables height/weather/RCS multipliers (E6+).
+export type UnitKillParams = Readonly<{
+  /** Probability drone survives (passes) a single engagement encounter. */
+  pPass: number;
+  /** Multiplier applied to effective radius for height / weather / RCS effects. */
+  effectiveRadiusMultiplier?: number;
+}>;
+
+/** Per-asset kill-probability table. Maps asset library key → individual parameters. */
+export const unitKillParams: Record<string, UnitKillParams> = {
+  // ЗУ-23М1: dual-barrel 23mm anti-aircraft gun; large footprint but lower precision vs small UAVs
+  "ЗУ-23М1":               { pPass: 0.70 },
+  // Анклав: short-range SAM (KZRK) with radar+IIR guidance; high single-shot effectiveness
+  "Анклав":                 { pPass: 0.25 },
+  // ЗПК-ЯкБ: Yak-B remote weapon station combo; moderate effectiveness
+  "ЗПК-ЯкБ":                { pPass: 0.35 },
+  // ТПУ-12,7мм: remote turret 12.7mm heavy machine gun; long range, better than 23mm on small targets
+  "ТПУ-12,7 мм":            { pPass: 0.40 },
+  // Бекас: scout-strike UCAV (counter-UAV role at close range)
+  "Бекас":                  { pPass: 0.20 },
+  // ЗУ-23М-1М на базе УРАЛ 4320: mobile twin-23mm; slightly better mobility => marginally better engagement
+  "ЗУ-23М-1М на базе УРАЛ 4320": { pPass: 0.65 },
+};
+
+// Fallback value for unknown assets (backwards-compatible default from original model).
+const EFFECTIVE_PASS_FALLBACK = 0.5;
+
+/** Look up kill parameters for a given asset key; falls back to generic default. */
+export function getUnitKillParams(assetKey: string): UnitKillParams {
+  return unitKillParams[assetKey] ?? { pPass: EFFECTIVE_PASS_FALLBACK };
+}
+
 // Conditional equipment outcome model: coverage geometry + one seeded draw per object.
-// unitProbability is an agreed assumption, not confirmed field data (see ADR-0031).
-export const effectModel = { id: "coverage-neutralization@1", unitProbability: .5 } as const;
+// Each unit now uses its own unitKillParams.pPass instead of a flat unitProbability.
+export const effectModel = { id: "coverage-neutralization@2" } as const;
 // A placed asset instance as used by modeling: local meters, effective conditional TTХ.
 export type DefenseUnit = { id: string; xM: number; yM: number; radiusM: number; angleDeg: number; rotationDeg: number; quantity: number };
 export type MotionConfig = { durationMs: number; count: number; seed: number; scatter: number };
@@ -58,7 +94,6 @@ function coverageEntry(unit: DefenseUnit, start: Point, end: Point): { s: number
   if (!sectorCovers(bearing, unit.rotationDeg, unit.angleDeg)) return null;
   return { s: Number.isFinite(s) ? s : sClamped, bearingDeg: bearing };
 }
-const neutralizationProbability = (units: number) => 1 - Math.pow(effectModel.unitProbability, units);
 function validateDefenseUnits(units: DefenseUnit[]) {
   if (!Array.isArray(units)) throw new Error("Некорректная конфигурация средств.");
   const ids = new Set<string>();
@@ -95,15 +130,47 @@ export function generateRun(config: MotionConfig, library: Library, index: numbe
     const object: MovingObject = { id, bearingDeg, sector: sectorAt(bearingDeg), start, end, durationMs: duration, startMs, endMs: startMs + duration };
     let hitCount = 0;
     let firstCovering: { by: string; s: number; xM: number; yM: number } | null = null;
+    // Collect one pPass draw per unit instance across all covering zones.
+    const survivors: number[] = [];
     const outcome = outcomeRandom();
+    // Union-of-circles: collect (s, unitId) pairs, sort by s, merge overlapping
+    // intervals by proximity along trajectory, count distinct units in each group.
+    const EPSILON_S = 1e-6;
+    type _Entry = { s: number; id: string };
+    const entries: _Entry[] = [];
     for (const unit of defenseUnits) {
       const entry = coverageEntry(unit, start, end);
       if (!entry) continue;
+      entries.push({ s: entry.s, id: unit.id });
       hitCount += unit.quantity;
+      const kp = getUnitKillParams(unit.id);
+      for (let i = 0; i < unit.quantity; i++) {
+        survivors.push(kp.pPass);
+      }
       const xM = start.xM + entry.s * (end.xM - start.xM), yM = start.yM + entry.s * (end.yM - start.yM);
       if (!firstCovering || entry.s < firstCovering.s) firstCovering = { by: unit.id, s: entry.s, xM, yM };
     }
-    if (firstCovering && outcome < neutralizationProbability(hitCount)) {
+    // Deduplicate hitCount by merging overlapping intervals along trajectory parameter s.
+    if (entries.length > 0) {
+      entries.sort((a, b) => a.s - b.s);
+      const groups: _Entry[][] = [[entries[0]]];
+      for (let i = 1; i < entries.length; i++) {
+        const prev = groups[groups.length - 1];
+        const lastS = prev[prev.length - 1].s;
+        if (Math.abs(entries[i].s - lastS) <= EPSILON_S) {
+          prev.push(entries[i]);
+        } else {
+          groups.push([entries[i]]);
+        }
+      }
+      hitCount = 0;
+      for (const group of groups) {
+        hitCount += new Set(group.map(e => e.id)).size;
+      }
+    }
+    const survivalProduct = survivors.reduce((acc, p) => acc * p, 1);
+    const neutralizedProbability = 1 - survivalProduct;
+    if (firstCovering && outcome < neutralizedProbability) {
       object.neutralized = { by: firstCovering.by, units: hitCount,
         atMs: startMs + firstCovering.s * duration, xM: firstCovering.xM, yM: firstCovering.yM };
     }
