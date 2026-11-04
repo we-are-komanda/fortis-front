@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createDefaultDefenseProject } from "@/shared/lib/defense-project";
-import { buildProjectScenario, projectLocalPoint } from "./project-scenario";
+import { buildProjectScenario, effectivePlacementCoverage, projectLocalPoint } from "./project-scenario";
 import { buildMapScaleBar, buildProtectedObjectWorkingViewState } from "./echelon-map-model";
 import { defaultMotionConfig, generateRun, protectionRule, summarizeRun } from "./mass-motion";
 import type { Library } from "./scenario-playback";
@@ -51,4 +51,31 @@ test("project boundary is used by Monte Carlo paths while seeded timing stays re
   assert.deepEqual(summarizeRun(run), summarizeRun(generateRun(defaultMotionConfig, library, 1, protectionRule.radiusM)));
   assert.throws(() => generateRun(defaultMotionConfig, library, 0, NaN));
   assert.throws(() => generateRun(defaultMotionConfig, library, 0, 10000));
+});
+test("Monte Carlo consumes placed configuration: local units carry effective conditional coverage", () => {
+  const project = createDefaultDefenseProject();
+  project.baseObject = {id: "site", name: "Выбранный объект", center: {lat: 55, lng: 37}};
+  const layerId = project.layers[0].id;
+  project.placedObjects = [
+    {id: "u1", assetId: "", layerId, quantity: 2, status: "active", customCoverageRadius: 2500, customCoverageAngle: 90, coordinates: {lat: 55.0001, lng: 37}, createdAt: "", updatedAt: ""},
+    {id: "u2", assetId: "", layerId, quantity: 1, status: "maintenance", customCoverageRadius: 2500, coordinates: {lat: 55.0002, lng: 37}, createdAt: "", updatedAt: ""},
+    {id: "u3", assetId: "", layerId, quantity: 1, status: "planned", customCoverageRadius: 0, coordinates: {lat: 55.0003, lng: 37}, createdAt: "", updatedAt: ""}];
+  const scene = buildProjectScenario(project);
+  assert.deepEqual(scene.defenseUnits.map(unit => [unit.id, unit.radiusM, unit.angleDeg, unit.quantity]), [["u1", 2500, 90, 2]]);
+  assert.deepEqual(scene.placements.map(placement => placement.participates), [true, false, false]);
+  const first = summarizeRun(generateRun(defaultMotionConfig, library, 4, scene.protectionRadiusM, scene.defenseUnits));
+  assert.equal(first.neutralized, summarizeRun(generateRun(defaultMotionConfig, library, 4, scene.protectionRadiusM, scene.defenseUnits)).neutralized);
+  assert.ok(first.neutralizedRate >= 0 && first.neutralizedRate <= 1);
+  assert.equal(summarizeRun(generateRun(defaultMotionConfig, library, 4, scene.protectionRadiusM)).neutralized, 0);
+});
+test("effective coverage falls back to catalog values, manual overrides win, odd types stay excluded", () => {
+  const circle = { coverageType: "circle", coverageRadius: 1500 } as Parameters<typeof effectivePlacementCoverage>[1];
+  const placed = { status: "active" } as Parameters<typeof effectivePlacementCoverage>[0];
+  assert.deepEqual(effectivePlacementCoverage(placed, circle), { coverageRadiusM: 1500, coverageAngleDeg: 360, participates: true });
+  const sector = { coverageType: "sector", coverageRadius: 1500, coverageAngle: 120 } as Parameters<typeof effectivePlacementCoverage>[1];
+  assert.deepEqual(effectivePlacementCoverage(placed, sector), { coverageRadiusM: 1500, coverageAngleDeg: 120, participates: true });
+  const none = { coverageType: "none" } as Parameters<typeof effectivePlacementCoverage>[1];
+  assert.deepEqual(effectivePlacementCoverage(placed, none), { coverageRadiusM: null, coverageAngleDeg: 360, participates: false });
+  assert.deepEqual(effectivePlacementCoverage({ status: "active", customCoverageRadius: 800 } as Parameters<typeof effectivePlacementCoverage>[0], none), { coverageRadiusM: 800, coverageAngleDeg: 360, participates: true });
+  assert.deepEqual(effectivePlacementCoverage({ status: "inactive", customCoverageRadius: 800 } as Parameters<typeof effectivePlacementCoverage>[0], circle), { coverageRadiusM: 800, coverageAngleDeg: 360, participates: false });
 });

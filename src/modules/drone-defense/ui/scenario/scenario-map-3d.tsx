@@ -159,11 +159,11 @@ function MassMarkers({ markers, zoom, dark, showTrails, terrain }: { markers: Mo
     markers.forEach((marker, index) => {
       // Lift map symbols slightly above the displayed terrain; this is not a flight altitude.
       const height = (x: number, y: number) => ((terrain ? terrainElevation(x, y) : 0) + 8) / 1000;
-      object.scale.setScalar((marker.triggered ? .22 : .14) / zoom);
+      object.scale.setScalar((marker.triggered ? .22 : marker.neutralized ? .18 : .14) / zoom);
       object.position.set(marker.xM / 1000, height(marker.xM, marker.yM), -marker.yM / 1000);
       object.updateMatrix();
       mesh.setMatrixAt(index, object.matrix);
-      const color = new Color(marker.triggered ? (dark ? "#5eead4" : "#047857") : (dark ? darkSectorColors : sectorColors)[marker.sector]);
+      const color = new Color(marker.neutralized ? (dark ? "#c4b5fd" : "#7c3aed") : marker.triggered ? (dark ? "#5eead4" : "#047857") : (dark ? darkSectorColors : sectorColors)[marker.sector]);
       mesh.setColorAt(index, color);
       trailGeometry.attributes.position.setXYZ(index * 2, marker.tail.xM / 1000, height(marker.tail.xM, marker.tail.yM), -marker.tail.yM / 1000);
       trailGeometry.attributes.position.setXYZ(index * 2 + 1, marker.xM / 1000, height(marker.xM, marker.yM), -marker.yM / 1000);

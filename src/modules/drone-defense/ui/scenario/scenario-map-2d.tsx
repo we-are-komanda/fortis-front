@@ -22,6 +22,17 @@ function Map2D({ projectScene, protectionRadiusM = protectionRule.radiusM, marke
     </g>}
     {!projectScene && roads.map((road, i) => <g key={i}><polyline points={points(road)} fill="none" stroke="#c8c7b5" strokeWidth="14" strokeLinejoin="round"/><polyline points={points(road)} fill="none" stroke="var(--scene-road)" strokeWidth="12" strokeLinejoin="round"/></g>)}
     {layers.enterprise && (projectScene ? <ProjectSite2D scene={projectScene} zoom={zoom} selected={selectedObject} onSelect={onSelectObject}/> : <FactoryCampusPlan selected={selectedObject} onSelect={onSelectObject}/>)}
+    {projectScene && <g data-coverage-zones aria-label="Условные зоны средств">
+      {projectScene.placements.filter(placement => placement.participates).map(placement => {
+        const color = "#7c3aed", r = placement.coverageRadiusM as number;
+        const polar = (bearing: number) => [placement.xM + r * Math.sin(bearing * Math.PI / 180), -(placement.yM + r * Math.cos(bearing * Math.PI / 180))] as const;
+        const shape = placement.coverageAngleDeg >= 360
+          ? <circle cx={placement.xM} cy={-placement.yM} r={r} fill="none" stroke={color} strokeWidth="1" vectorEffect="non-scaling-stroke" strokeDasharray="120 80" opacity=".8" />
+          : (() => { const [x1, y1] = polar(placement.rotation - placement.coverageAngleDeg / 2), [x2, y2] = polar(placement.rotation + placement.coverageAngleDeg / 2);
+            return <path d={`M${placement.xM},${-placement.yM} L${x1.toFixed(2)},${y1.toFixed(2)} A${r},${r} ${placement.coverageAngleDeg > 180 ? 1 : 0} 1 ${x2.toFixed(2)},${y2.toFixed(2)} Z`} fill={color} opacity=".12" stroke={color} strokeWidth="1" vectorEffect="non-scaling-stroke" />; })();
+        return <g key={placement.id} data-coverage-zone={placement.id}><title>{placement.name}: условная зона {placement.coverageRadiusM} м / {placement.coverageAngleDeg}°</title>{shape}</g>;
+      })}
+    </g>}
     {markers && <g data-protection-zone aria-label="Условная зона защиты">
       <circle r={protectionRadiusM} fill="none" stroke="var(--protection)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
       {zoom >= 8 && <text textAnchor="middle" y={-protectionRadiusM - 180 / zoom} fill="var(--protection)" fontSize={240 / zoom}>Условная зона защиты</text>}
@@ -35,9 +46,11 @@ function Map2D({ projectScene, protectionRadiusM = protectionRule.radiusM, marke
         <text x={p.xM + 340/zoom} y={-p.yM + 120/zoom} fill="currentColor" fontSize={440/zoom} fontWeight="700">{track.label}</text></>}
       </g>;
     })}
-    {markers?.map(marker => <g key={marker.id} data-motion-marker={marker.triggered ? undefined : ""} data-protection-signal={marker.triggered ? marker.id : undefined} data-sector={marker.sector} style={{color:marker.triggered ? "var(--protection)" : sectorColors[marker.sector]}}>
-      {layers.tracks && !marker.triggered && <line x1={marker.tail.xM} y1={-marker.tail.yM} x2={marker.xM} y2={-marker.yM} stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" opacity=".7" />}
-      {marker.triggered ? <path d={`M${marker.xM},${-marker.yM - 150 / zoom} l${150 / zoom},${150 / zoom} l${-150 / zoom},${150 / zoom} l${-150 / zoom},${-150 / zoom} Z`} fill="currentColor"><title>Объект {marker.id + 1}: условное срабатывание</title></path> : <circle cx={marker.xM} cy={-marker.yM} r={90/zoom} fill="currentColor" />}
+    {markers?.map(marker => <g key={marker.id} data-motion-marker={marker.triggered || marker.neutralized ? undefined : ""} data-protection-signal={marker.triggered ? marker.id : undefined} data-neutralized-marker={marker.neutralized ? marker.id : undefined} data-sector={marker.sector} style={{color: marker.neutralized ? "var(--neutralized, #7c3aed)" : marker.triggered ? "var(--protection)" : sectorColors[marker.sector]}}>
+      {layers.tracks && !marker.triggered && !marker.neutralized && <line x1={marker.tail.xM} y1={-marker.tail.yM} x2={marker.xM} y2={-marker.yM} stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" opacity=".7" />}
+      {marker.neutralized ? <path d={`M${marker.xM - 150 / zoom},${-marker.yM - 150 / zoom} l${300 / zoom},${300 / zoom} M${marker.xM - 150 / zoom},${-marker.yM + 150 / zoom} l${300 / zoom},${-300 / zoom}`} stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" fill="none"><title>Объект {marker.id + 1}: условно нейтрализован</title></path>
+        : marker.triggered ? <path d={`M${marker.xM},${-marker.yM - 150 / zoom} l${150 / zoom},${150 / zoom} l${-150 / zoom},${150 / zoom} l${-150 / zoom},${-150 / zoom} Z`} fill="currentColor"><title>Объект {marker.id + 1}: условное срабатывание</title></path>
+          : <circle cx={marker.xM} cy={-marker.yM} r={90/zoom} fill="currentColor" />}
     </g>)}
     <text x={-extent * .95} y={-extent * .9} className={styles.mapLabel} style={{fontSize:extent * .06}}>С ↑</text>
   </svg>;

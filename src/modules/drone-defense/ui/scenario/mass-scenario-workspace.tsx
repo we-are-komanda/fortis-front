@@ -2,13 +2,13 @@
 import dynamic from "next/dynamic";
 import type { DefenseProject } from "@/shared/types/defense-project";
 import { useDefenseProjectStore } from "@/shared/lib/use-defense-project-store";
-import { buildProjectScenario } from "../../domain/project-scenario";
+import { buildProjectScenario, type ProjectScenario } from "../../domain/project-scenario";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useTheme } from "next-themes";
 import { Button, Modal, Typography, theme } from "antd";
 import libraryData from "../../infra/data/scenario/library-v1.json";
 import { clockAt, formatTime, initialClock, transitionClock, type Clock, type ClockAction, type Library, type Track } from "../../domain/scenario-playback";
-import { computeBatch, defaultMotionConfig, frameAt, generateRun, motionVersion, protectionRule, summarizeBatch, summarizeRun, sectorLabels, sectorColors, type MotionConfig, type RunSummary } from "../../domain/mass-motion";
+import { computeBatch, defaultMotionConfig, effectModel, frameAt, generateRun, motionVersion, protectionRule, summarizeBatch, summarizeRun, sectorLabels, sectorColors, type MotionConfig, type RunSummary } from "../../domain/mass-motion";
 import { factoryCampusZoom } from "../../domain/factory-campus";
 import { workingZoom, type ScenarioLayers } from "../../domain/scenario-site";
 import { ScenarioMap2D } from "./scenario-map-2d";
@@ -20,11 +20,43 @@ const library = libraryData as Library;
 const noReferenceTracks: Track[] = [];
 const layerLabels = { terrain: "Рельеф", enterprise: "Предприятие", tracks: "Следы движения", radius: "Радиус 10 км" };
 
+const statusLabels: Record<string, string> = { active: "Действует", planned: "Запланировано", inactive: "Выключено", maintenance: "Обслуживание" };
+const parseCoverage = (value: string) => { if (!/^\d+(\.\d+)?$/.test(value)) return null; const number = Number(value); return number > 0 && number <= 100000 ? number : null; };
+// Controlled inputs with immediate commit to the placed instance (ADR-0009). Invalid text is ignored,
+// so the field reverts to the saved value instead of silently clearing coverage.
+function CoverageSettingRow({ placement, onCommit }: { placement: ProjectScenario["placements"][number]; onCommit: (patch: { customCoverageRadius?: number; customCoverageAngle?: number }) => void }) {
+  const radiusChange = (text: string) => {
+    if (text === "") onCommit({ customCoverageRadius: undefined });
+    else { const value = parseCoverage(text); if (value !== null) onCommit({ customCoverageRadius: value }); }
+  };
+  const angleChange = (text: string) => {
+    if (text === "") onCommit({ customCoverageAngle: undefined });
+    else { const value = parseCoverage(text); if (value !== null) onCommit({ customCoverageAngle: Math.min(360, value) }); }
+  };
+  return <div data-coverage-row={placement.id} className={styles.coverageRow}>
+    <div className={styles.coverageHeader}>
+      <span className={styles.coverageName} title={placement.name}>{placement.name} · {placement.quantity} шт. · {statusLabels[placement.status]}</span>
+      <span data-coverage-participates={placement.participates} className={styles.coverageBadge}>{placement.participates ? "учитывается" : "не участвует"}</span>
+    </div>
+    <div className={styles.coverageInputs}>
+      <label>Дальность, м
+        <input inputMode="decimal" value={placement.coverageRadiusM === null ? "" : String(placement.coverageRadiusM)} placeholder="не задана" data-coverage-radius={placement.id}
+          onChange={event => radiusChange(event.target.value)} />
+      </label>
+      <label>Угол, °
+        <input inputMode="decimal" value={String(placement.coverageAngleDeg)} data-coverage-angle={placement.id}
+          onChange={event => angleChange(event.target.value)} />
+      </label>
+    </div>
+  </div>;
+}
+
 export default function MassScenarioWorkspace({ project }: { project?: DefenseProject }) {
   const projectScene = useMemo(() => project ? buildProjectScenario(project) : undefined, [project]);
   const protectionRadiusM = projectScene?.protectionRadiusM ?? protectionRule.radiusM;
   const siteZoom = projectScene?.workingZoom ?? workingZoom;
   const selectProjectObject = useDefenseProjectStore(state => state.selectObject);
+  const updatePlacedObject = useDefenseProjectStore(state => state.updatePlacedObject);
   const { resolvedTheme } = useTheme();
   const { token } = theme.useToken();
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -45,11 +77,12 @@ export default function MassScenarioWorkspace({ project }: { project?: DefensePr
   const [fit, setFit] = useState(0);
   const [objectId, setObjectId] = useState("");
   const [layers, setLayers] = useState<ScenarioLayers>({ terrain: true, enterprise: true, tracks: true, radius: true });
-  const run = useMemo(() => generateRun(config, library, runIndex, protectionRadiusM), [config, runIndex, protectionRadiusM]);
+  const defenseUnits = useMemo(() => projectScene?.defenseUnits ?? [], [projectScene]);
+  const run = useMemo(() => generateRun(config, library, runIndex, protectionRadiusM, defenseUnits), [config, runIndex, protectionRadiusM, defenseUnits]);
   const summary = useMemo(() => summarizeRun(run), [run]);
   const aggregate = useMemo(() => results ? summarizeBatch(results) : null, [results]);
   const frame = useMemo(() => frameAt(run, clock.timeMs), [run, clock.timeMs]);
-  const displayMarkers = useMemo(() => [...frame.markers, ...frame.signals], [frame]);
+  const displayMarkers = useMemo(() => [...frame.markers, ...frame.signals, ...frame.intercepts], [frame]);
   const nextEventMs = Math.min(...run.objects.filter(object => object.endMs > clock.timeMs).map(object => object.endMs));
   const playing = clock.status === "playing";
   const validSeed = /^\d+$/.test(seedText) && Number(seedText) <= 0xffffffff;
@@ -98,7 +131,7 @@ export default function MassScenarioWorkspace({ project }: { project?: DefensePr
     cancel(); act({ type: "pause" }); setResults(null); setNotice(""); setProgress(0);
     const controller = new AbortController(); batch.current = controller;
     try {
-      const next = await computeBatch(config, library, batchSize, controller.signal, setProgress, protectionRadiusM);
+      const next = await computeBatch(config, library, batchSize, controller.signal, setProgress, protectionRadiusM, defenseUnits);
       if (!controller.signal.aborted) { setResults(next); setNotice(`Готово: ${next.length} прогонов. Выберите любой для просмотра.`); }
     } catch (error) {
       if (!controller.signal.aborted) setNotice(error instanceof Error ? error.message : "Ошибка расчёта.");
@@ -128,9 +161,18 @@ export default function MassScenarioWorkspace({ project }: { project?: DefensePr
           <label className={styles.pair}>Размер пакета<select aria-label="Размер пакета" value={batchSize} onChange={e => { cancel(); selectRun(0); setResults(null); setBatchSize(Number(e.target.value)); setNotice(""); }}>{[100, 500].map(n => <option key={n} value={n}>{n} прогонов</option>)}</select></label>
           <div className={styles.batchActions}><button className={styles.primary} disabled={progress !== null || !validSeed} onClick={calculate}>Рассчитать пакет</button>{progress !== null && <button onClick={() => { cancel(); setNotice("Расчёт отменён. Частичные результаты не сохранены."); }}>Отменить</button>}</div>
           {progress !== null && <div role="status"><progress max={batchSize} value={progress} aria-label="Прогресс расчёта" /> {progress} / {batchSize}</div>}
-          {aggregate && <div data-batch-result><p>Пики активных · {results!.length} прогонов</p><dl className={styles.batchStats}>{Object.entries({ Минимум: aggregate.min, Медиана: aggregate.median, p90: aggregate.p90, Максимум: aggregate.max }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>Средняя одновременная нагрузка: {aggregate.meanActive.toFixed(1)} объекта. p90 — квантиль пиков, не вероятность воздействия.</p></div>}
+          {aggregate && <div data-batch-result><p>Пики активных · {results!.length} прогонов</p><dl className={styles.batchStats}>{Object.entries({ Минимум: aggregate.min, Медиана: aggregate.median, p90: aggregate.p90, Максимум: aggregate.max }).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl><p>Средняя одновременная нагрузка: {aggregate.meanActive.toFixed(1)} объекта. p90 — квантиль пиков, не вероятность воздействия.</p>{projectScene && <p data-batch-neutralized>Условно нейтрализовано: медиана {(aggregate.neutralizedRates.median * 100).toFixed(1)}%, p90 {(aggregate.neutralizedRates.p90 * 100).toFixed(1)}% из {config.count} объектов прогона.</p>}</div>}
           <p role="status">{notice}</p>
         </div>
+        <fieldset className={styles.section}><legend>Эффективность средств</legend>
+          {projectScene ? <>
+            {projectScene.placements.length ? projectScene.placements.map(placement =>
+              <CoverageSettingRow key={placement.id} placement={placement}
+                onCommit={patch => updatePlacedObject(placement.id, patch)} />)
+              : <p>Размещённых средств нет. Расчёт оценивает только движение.</p>}
+            <p>Дальность и угол — условные параметры расчёта (оценки). Статус учитывается: «Действует» и «Запланировано» участвуют, «Выключено» и «Обслуживание» — нет. Изменения применяются к размещению и попадут на сервер только после явного сохранения проекта.</p>
+          </> : <p>Проект не выбран: расчёт без конфигурации движения.</p>}
+        </fieldset>
         <fieldset className={styles.section}><legend>Слои карты</legend>{(Object.entries(layerLabels) as [keyof ScenarioLayers, string][]).filter(([key]) => !projectScene || key !== "terrain").map(([key, label]) => <label className={styles.layer} key={key}><input type="checkbox" checked={layers[key]} onChange={e => setLayers(current => ({ ...current, [key]: e.target.checked }))} />{projectScene && key === "enterprise" ? "Объект и средства" : label}</label>)}</fieldset>
       </aside>
       <div className={styles.center}>
@@ -140,7 +182,7 @@ export default function MassScenarioWorkspace({ project }: { project?: DefensePr
           <label className={styles.runSelect}>Прогон<select aria-label="Номер прогона" value={runIndex} onChange={e => selectRun(Number(e.target.value))}>{Array.from({ length: results?.length ?? 1 }, (_, index) => <option value={index} key={index}>№{index + 1}{results ? ` · пик ${results[index].peak}` : " · предварительный"}</option>)}</select></label>
         </div>
         {zoom >= 8 && <p className={styles.offscreen}>Дальние объекты вне кадра. Здесь видны подход к предприятию и условные срабатывания на зелёной границе.</p>}
-        <div className={styles.motionCounters} aria-label="Состояние объектов"><span>Ожидают <strong data-waiting>{frame.waiting}</strong></span><span>Активны <strong>{frame.markers.length}</strong></span><span>Условные срабатывания <strong data-finished>{frame.finished}</strong></span><span>Пик прогона <strong>{summary.peak}</strong></span></div>
+        <div className={styles.motionCounters} aria-label="Состояние объектов"><span>Ожидают <strong data-waiting>{frame.waiting}</strong></span><span>Активны <strong>{frame.markers.length}</strong></span><span>Условные срабатывания <strong data-finished>{frame.finished}</strong></span><span>Нейтрализованы <strong data-neutralized>{frame.neutralized}</strong></span><span>Пик прогона <strong>{summary.peak}</strong></span></div>
         <div className={styles.stage} data-view={view}>
           <div className={styles.mapControls}><button aria-label="Приблизить к объекту" title="Приблизить к объекту" onClick={() => focus(factoryCampusZoom)}>К объекту</button><button aria-pressed={view === "2d"} onClick={() => { setView("2d"); setReady(true); }}>2D</button><button aria-pressed={view === "3d"} disabled={webgl === false} onClick={() => { if (view !== "3d") { setReady(false); setView("3d"); } }}>3D</button></div>
           {view === "2d" ? <ScenarioMap2D {...sceneProps} /> : webgl && <SceneBoundary onError={onError}><Scene3D {...sceneProps} fit={fit} dark={resolvedTheme === "dark"} onReady={onReady} onError={onError} onZoom={setZoom} /></SceneBoundary>}
@@ -160,16 +202,26 @@ export default function MassScenarioWorkspace({ project }: { project?: DefensePr
       <Typography.Paragraph>Синтетическое движение · {config.count} объектов за {config.durationMs / 60000} минут</Typography.Paragraph>
       <Typography.Paragraph type="secondary">360° · движение в плане · условная защита на границе зоны</Typography.Paragraph>
       <Typography.Title level={5}>Условная зона защиты</Typography.Title>
-      <Typography.Paragraph>Достижение зелёной границы → условное срабатывание. Радиус {protectionRadiusM} м — граница условной зоны защиты, а не дальность средства защиты.</Typography.Paragraph>
+      <Typography.Paragraph>Объект, дошедший до зелёной границы без нейтрализации → условное срабатывание (прорыв). Радиус {protectionRadiusM} м — граница условной зоны защиты, а не дальность средства защиты.</Typography.Paragraph>
+      {projectScene && <Typography.Paragraph type="secondary">Конфигурация с карты участвует в расчёте: объекты, вошедшие в условную зону действующего средства, считаются нейтрализованными с заданной вероятностью.</Typography.Paragraph>}
       <section className={styles.protectionEvents} aria-label="Журнал условных срабатываний">
         <Typography.Title level={5}>Журнал условных срабатываний</Typography.Title>
-        <Typography.Paragraph>{frame.events.length ? `Срабатываний: ${frame.events.length}. Последние ${Math.min(5, frame.events.length)}:` : "Срабатываний пока нет."}</Typography.Paragraph>
+        <Typography.Paragraph>{frame.events.length ? `Прорвавшихся объектов: ${frame.events.length}. Последние ${Math.min(5, frame.events.length)}:` : "Срабатываний пока нет."}</Typography.Paragraph>
         <ol>{frame.events.slice(0, 5).map(event => <li key={event.id} data-protection-event={event.id}>
           <Button style={{ height: "auto", minHeight: 44 }} onClick={() => { setReferenceOpen(false); seek(event.endMs); focusCampus(); }} aria-label={`Показать срабатывание объекта ${event.id + 1}`}>
             <time>{time(event.endMs)}</time><span>Объект {event.id + 1} · {sectorLabels[event.sector]}<small>Условное срабатывание</small></span>
           </Button>
         </li>)}</ol>
       </section>
+      {projectScene && <section className={styles.protectionEvents} aria-label="Журнал нейтрализаций">
+        <Typography.Title level={5}>Журнал нейтрализаций</Typography.Title>
+        <Typography.Paragraph>{frame.intercepts.length ? `Нейтрализовано объектов: ${frame.intercepts.length}. Последние ${Math.min(5, frame.intercepts.length)}:` : "Нейтрализаций пока нет."}</Typography.Paragraph>
+        <ol>{frame.intercepts.slice(0, 5).map(intercept => <li key={intercept.id} data-intercept-event={intercept.id}>
+          <Button style={{ height: "auto", minHeight: 44 }} onClick={() => { setReferenceOpen(false); seek(intercept.tMs); focusCampus(); }} aria-label={`Показать нейтрализацию объекта ${intercept.id + 1}`}>
+            <time>{time(intercept.tMs)}</time><span>Объект {intercept.id + 1} · {sectorLabels[intercept.sector]}<small>{projectScene.placements.find(placement => placement.id == intercept.by)?.name ?? "Условная нейтрализация"}</small></span>
+          </Button>
+        </li>)}</ol>
+      </section>}
       <section aria-label="Направления входа">
         <Typography.Title level={5}>Откуда появляются · 360°</Typography.Title>
         <Typography.Paragraph>У каждого объекта свой угол появления в пределах 360°. Восемь секторов по сторонам света только группируют статистику.</Typography.Paragraph>
@@ -180,8 +232,8 @@ export default function MassScenarioWorkspace({ project }: { project?: DefensePr
       </section>
       {projectScene && <section aria-label="Конфигурация с карты">
         <Typography.Title level={5}>{projectScene.name}</Typography.Title>
-        <Typography.Paragraph>Объект и средства используют общее состояние с картой. Для любого объекта пока используется стандартная BIM-модель предприятия. Контур объекта условный. Средства показаны по координатам карты; их эффективность в этом прогоне не рассчитывается.</Typography.Paragraph>
-        <ul>{projectScene.placements.map(object => <li key={object.id}>{object.name} · {object.quantity} шт.</li>)}</ul>
+        <Typography.Paragraph>Объект и средства используют общее состояние с картой. Для любого выбранного объекта используется стандартная BIM-модель предприятия; контур объекта условный. Модель эффективности — условная ({effectModel.id}): объект, вошедший в условную зону действующего средства, нейтрализован с вероятностью {(effectModel.unitProbability * 100).toFixed(0)}% на одно учитываемое изделие (несколько изделий объединяются: 1−{(effectModel.unitProbability).toFixed(2).slice(1)}^k). Дальности и углы зон — оценки пользователя или значения каталога; это учебные допущения, не подтверждённая эффективность реальных средств.</Typography.Paragraph>
+        <ul>{projectScene.placements.map(object => <li key={object.id}>{object.name} · {object.quantity} шт. · {statusLabels[object.status]} · {object.participates ? `учитывается: ${object.coverageRadiusM} м / ${object.coverageAngleDeg}°` : "не участвует"}</li>)}</ul>
       </section>}
       <Typography.Title level={5}>Данные прогона</Typography.Title>
       <Typography.Paragraph type="secondary">Прогон №{runIndex + 1} · seed {run.seed} · {motionVersion} · сессия сбрасывается при выходе или перезагрузке</Typography.Paragraph>
