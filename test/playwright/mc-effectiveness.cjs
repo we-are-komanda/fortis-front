@@ -3,6 +3,7 @@ require('tsx/cjs');
 const { chromium, expect: baseExpect } = require('@playwright/test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { defaultGameSettings } = require('../../src/shared/lib/game-settings.ts');
 const { createDefaultDefenseProject } = require('../../src/shared/lib/defense-project.ts');
 const expect = baseExpect.configure({ timeout: 30000 });
 const base = process.env.SCN01_URL || 'http://localhost:3000';
@@ -49,13 +50,13 @@ fixture.placedObjects = fixture.assetLibrary.slice(0, 2).map((asset, i) => ({id:
     await expect(root.locator('[data-coverage-zones] g')).toHaveCount(2);
     // Countdown row carries the neutralization counter.
     await expect(root.locator('[data-neutralized]')).toBeVisible();
-    // Two units of each game type: 1 − .7^2 × .25^2 = .969375.
+    // Four independent units have 240 charges in total: at most 80% of 300 targets.
     const batchButton = root.getByRole('button', {name:'Рассчитать пакет', exact:true});
     await batchButton.click();
     await expect(root.locator('[data-batch-neutralized]')).toBeVisible();
     const neutralText = await root.locator('[data-batch-neutralized]').textContent();
     const median = Number(neutralText.match(/медиана ([\d.]+)%/)[1]);
-    assert.ok(Math.abs(median - 96.9375) < 1.5, neutralText);
+    assert.ok(median > 0 && median <= 80, neutralText);
     // Camera, view and selection must preserve a completed batch.
     await root.getByRole('button', {name: 'Приблизить к объекту', exact: true}).click();
     await root.getByRole('button', {name: `Средство: ${fixture.assetLibrary[0].name}, 2 шт.`, exact: true}).click();
@@ -84,6 +85,25 @@ fixture.placedObjects = fixture.assetLibrary.slice(0, 2).map((asset, i) => ({id:
     await expect(intercepts.first()).toBeVisible();
     await intercepts.first().getByRole('button').click();
     await expect(modal.getByText('Журнал нейтрализаций')).toHaveCount(0);
+    await rows.first().getByText('Игровые параметры', {exact: true}).click();
+    const setting = key => rows.first().locator(`[data-game-setting="${key}"]`);
+    await expect(setting('intervalMs')).toHaveValue('5');
+    await expect(setting('ammunition')).toHaveValue('60');
+    await setting('intervalMs').fill('0');
+    await setting('intervalMs').blur();
+    await expect(setting('intervalMs')).toHaveAttribute('aria-invalid', 'true');
+    await expect(root.locator('[data-batch-result]')).toBeVisible(); // invalid draft is not committed
+    await setting('intervalMs').fill('8');
+    await setting('intervalMs').blur();
+    await expect(root.locator('[data-batch-result]')).toHaveCount(0);
+    await expect(root).toHaveAttribute('data-time-ms', '0');
+    for (const [key, value] of Object.entries({reactionMs: '3', magazineSize: '4', ammunition: '9', reloadMs: '12', maxTargets: '2'})) {
+      await setting(key).fill(value); await setting(key).blur(); await expect(setting(key)).toHaveValue(value);
+    }
+    await rows.first().getByRole('button', {name: 'Общие игровые значения', exact: true}).click();
+    await expect(setting('intervalMs')).toHaveValue('5');
+    await expect(setting('ammunition')).toHaveValue('60');
+    assert.equal(await root.locator('aside').evaluate(el => el.scrollWidth > el.clientWidth), false);
     await page.screenshot({path: output + '/desktop.png'});
 
     // Both completed and in-flight batches become invalid when placement inputs change.
@@ -111,7 +131,8 @@ fixture.placedObjects = fixture.assetLibrary.slice(0, 2).map((asset, i) => ({id:
     });
     await batchButton.click();
     await expect(root.getByRole('progressbar')).toHaveAttribute('value', '10');
-    await radiusInput.fill('');
+    await setting('ammunition').fill('0');
+    await setting('ammunition').blur();
     await expect(root.getByRole('progressbar')).toHaveCount(0);
     await page.evaluate(async () => {
       window.__restoreMcTimer();
@@ -138,6 +159,10 @@ fixture.placedObjects = fixture.assetLibrary.slice(0, 2).map((asset, i) => ({id:
     await root.getByRole('button', {name: 'Параметры и результаты Монте-Карло', exact: true}).click();
     await expect(radiusInput).toBeVisible();
     await radiusInput.fill('20000');
+    await expect(setting('reloadMs')).toBeVisible();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
+    await rows.first().locator('details').evaluate(el => el.scrollIntoView({block: 'start'}));
+    await page.screenshot({path: output + '/mobile-settings.png'});
     await root.getByRole('button', {name: 'Скрыть настройки · к сцене', exact: true}).click();
     await expect(root.getByRole('button', {name: 'Пуск', exact: true})).toBeEnabled();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
@@ -145,7 +170,7 @@ fixture.placedObjects = fixture.assetLibrary.slice(0, 2).map((asset, i) => ({id:
 
     // With every object removed immediately, there are no boundary events to seek to.
     const allRemoved = structuredClone(fixture);
-    allRemoved.placedObjects.forEach(object => { object.quantity = 100; object.customCoverageRadius = 20000; });
+    allRemoved.placedObjects.forEach(object => { object.quantity = 100; object.customCoverageRadius = 20000; object.gameSettings = {...defaultGameSettings, reactionMs: 0}; });
     await page.route('**/api/defense/projects/mc-effectiveness-test', route => route.fulfill({json: allRemoved}));
     await page.reload();
     await expect(root.getByRole('button', {name: 'К следующему срабатыванию', exact: true})).toBeDisabled();
@@ -154,9 +179,13 @@ fixture.placedObjects = fixture.assetLibrary.slice(0, 2).map((asset, i) => ({id:
     await expect(root.locator('[data-neutralized]')).toHaveText('300');
     await expect(root.locator('[data-finished]')).toHaveText('0');
 
+    await root.getByRole('button', {name: 'Параметры и результаты Монте-Карло', exact: true}).click();
+    await rows.first().getByText('Игровые параметры', {exact: true}).click();
+    await expect(setting('reactionMs')).toHaveValue('0'); // settings hydrated from the saved document
+
     assert.deepEqual(writes, []);
     assert.deepEqual(errors, []);
     assert.deepEqual(consoleErrors, []);
-    console.log('PASS: game coefficients, reference dialog, 2D, batch invalidation/cancellation/restart, selection, mobile, zero activity and no phantom events; no writes or browser errors');
+    console.log('PASS: game resources, editable settings, saved settings hydration, reference dialog, 2D, batch invalidation/cancellation/restart, selection, mobile, zero activity and no phantom events; no writes or browser errors');
   } finally { await browser.close(); }
 })().catch(error => {console.error(error);process.exitCode=1;});

@@ -125,6 +125,7 @@ export type PlacedDefenseObject = {
   fieldProvenance?: Record<string, DataProvenance>;
   customCoverageRadius?: number;
   customCoverageAngle?: number;
+  gameSettings?: import("@/shared/lib/game-settings").GameSettings;
   compoundProfile?: PlacedDefenseCompoundProfile;
   hasGeometryConflict?: boolean;
   hasCoverageConflict?: boolean;

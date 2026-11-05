@@ -1,12 +1,13 @@
 import { DURATION_MS, validateLibrary, type Library, type Sample } from "./scenario-playback";
 import { factoryCampusSize } from "./factory-campus";
+import { resolveGameSettings, type GameSettings } from "@/shared/lib/game-settings";
 
-export const motionVersion = "mass-motion@6";
+export const motionVersion = "mass-motion@7";
 // A schematic training boundary around the whole campus, not equipment coverage.
 export const protectionRule = { id: "training-boundary@1", radiusM: factoryCampusSize, signalDurationMs: 60000 } as const;
 // Fictional game coefficients, not measured equipment capabilities (ADR-0032).
 export type UnitKillParams = Readonly<{
-  /** Probability a game object passes one unit's zone without an effect. */
+  /** Probability a game attempt has no effect on its target. */
   pPass: number;
 }>;
 
@@ -28,11 +29,10 @@ export function getUnitKillParams(assetKey: string): UnitKillParams {
   return Object.hasOwn(unitKillParams, assetKey) ? unitKillParams[assetKey] : { pPass: EFFECTIVE_PASS_FALLBACK };
 }
 
-// Conditional equipment outcome model: coverage geometry + one seeded draw per object.
-// Each unit now uses its own unitKillParams.pPass instead of a flat unitProbability.
-export const effectModel = { id: "coverage-neutralization@3" } as const;
+// Fictional game cycles with finite charges; one seeded draw per actual attempt.
+export const effectModel = { id: "coverage-neutralization@4" } as const;
 // A placed asset instance as used by modeling: local meters, effective conditional TTХ.
-export type DefenseUnit = { id: string; assetKey?: string; xM: number; yM: number; radiusM: number; angleDeg: number; rotationDeg: number; quantity: number };
+export type DefenseUnit = { id: string; assetKey?: string; xM: number; yM: number; radiusM: number; angleDeg: number; rotationDeg: number; quantity: number; gameSettings?: GameSettings };
 export type MotionConfig = { durationMs: number; count: number; seed: number; scatter: number };
 type Point = Pick<Sample, "xM" | "yM" | "zM">;
 export const sectorLabels = ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"];
@@ -59,11 +59,11 @@ const OUTCOME_STREAM_KEY = 0x51ed270b;
 // rotationDeg and bearing use the map convention: 0° = north, increasing clockwise.
 const sectorCovers = (bearingDeg: number, rotationDeg: number, angleDeg: number) =>
   angleDeg >= 360 || Math.abs((((bearingDeg - rotationDeg) % 360 + 540) % 360) - 180) <= angleDeg / 2 + 1e-9;
-// The first point in a closed sector is a start/end point, a circle root or a radial-edge crossing.
-function coverageEntry(unit: DefenseUnit, start: Point, end: Point): { s: number; bearingDeg: number } | null {
+// Split at circle/sector boundaries; reflex sectors may produce two separate windows.
+export function coverageIntervals(unit: DefenseUnit, start: Point, end: Point): [number, number][] {
   const dx = end.xM - start.xM, dy = end.yM - start.yM;
   const lengthSq = dx * dx + dy * dy;
-  if (!Number.isFinite(lengthSq) || lengthSq <= 0) return null;
+  if (!Number.isFinite(lengthSq) || lengthSq <= 0) return [];
   const ox = start.xM - unit.xM, oy = start.yM - unit.yM;
   const a = lengthSq, b = 2 * (ox * dx + oy * dy), c = ox * ox + oy * oy - unit.radiusM * unit.radiusM;
   const candidates = [0, 1];
@@ -78,13 +78,20 @@ function coverageEntry(unit: DefenseUnit, start: Point, end: Point): { s: number
     const cross = dx * ry - dy * rx;
     if (Math.abs(cross) > 1e-9) candidates.push((oy * rx - ox * ry) / cross);
   }
-  for (const s of candidates.filter(s => s >= 0 && s <= 1).sort((a, b) => a - b)) {
-    const x = ox + s * dx, y = oy + s * dy;
-    const distance = Math.hypot(x, y);
+  const cuts = [...new Set(candidates.filter(s => s >= 0 && s <= 1))].sort((a, b) => a - b);
+  const intervals: [number, number][] = [];
+  for (let i = 1; i < cuts.length; i++) {
+    const from = cuts[i - 1], to = cuts[i];
+    if (to - from < 1e-12) continue;
+    const s = (from + to) / 2, x = ox + s * dx, y = oy + s * dy;
     const bearingDeg = (Math.atan2(x, y) * 180 / Math.PI + 360) % 360;
-    if (distance <= unit.radiusM + 1e-7 && (distance <= 1e-7 || sectorCovers(bearingDeg, unit.rotationDeg, unit.angleDeg))) return { s, bearingDeg };
+    if (Math.hypot(x, y) <= unit.radiusM + 1e-7 && sectorCovers(bearingDeg, unit.rotationDeg, unit.angleDeg)) {
+      const previous = intervals.at(-1);
+      if (previous && Math.abs(previous[1] - from) < 1e-12) previous[1] = to;
+      else intervals.push([from, to]);
+    }
   }
-  return null;
+  return intervals;
 }
 function validateDefenseUnits(units: DefenseUnit[]) {
   if (!Array.isArray(units)) throw new Error("Некорректная конфигурация средств.");
@@ -94,6 +101,75 @@ function validateDefenseUnits(units: DefenseUnit[]) {
     ids.add(unit.id);
     if (![unit.xM, unit.yM, unit.rotationDeg, unit.radiusM, unit.angleDeg].every(Number.isFinite) || unit.radiusM <= 0 || !(unit.angleDeg > 0) || unit.angleDeg > 360 ||
       !Number.isSafeInteger(unit.quantity) || unit.quantity < 1 || (unit.assetKey !== undefined && typeof unit.assetKey !== "string")) throw new Error("Некорректная конфигурация средств.");
+    resolveGameSettings(unit.gameSettings);
+  }
+  if (units.reduce((sum, unit) => sum + unit.quantity, 0) > 1000) throw new Error("Игровой прогон поддерживает до 1000 экземпляров средств. Уменьшите количество.");
+}
+
+// Applies only abstract game rules; supplied objects are the fresh, unmodified schedule.
+export function resolveGameEffects(objects: MovingObject[], units: DefenseUnit[], random: () => number) {
+  validateDefenseUnits(units);
+  type Window = { object: MovingObject; entry: number; ready: number; exit: number };
+  type State = { unit: DefenseUnit; settings: GameSettings; order: number; at: number; charges: number; magazine: number; windows: Window[] };
+  const queue: State[] = [];
+  const enqueue = (state: State) => {
+    let low = 0, high = queue.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1, other = queue[mid];
+      if (other.at < state.at || (other.at === state.at && other.order < state.order)) low = mid + 1;
+      else high = mid;
+    }
+    queue.splice(low, 0, state);
+  };
+  const nextTime = (state: State) => {
+    state.windows = state.windows.filter(window => !window.object.neutralized && window.exit > state.at);
+    let next = Infinity;
+    for (const window of state.windows) next = Math.min(next, Math.max(state.at, window.ready));
+    return next;
+  };
+  let order = 0;
+  for (const unit of [...units].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)) {
+    const settings = resolveGameSettings(unit.gameSettings);
+    if (settings.ammunition === 0) continue;
+    const windows = objects.flatMap(object => coverageIntervals(unit, object.start, object.end).map(([from, to]) => {
+      const entry = object.startMs + from * object.durationMs;
+      return { object, entry, ready: entry + settings.reactionMs, exit: Math.min(object.endMs, object.startMs + to * object.durationMs) };
+    })).filter(window => window.ready < window.exit).sort((a, b) => a.entry - b.entry || a.object.id - b.object.id);
+    if (!windows.length) continue;
+    for (let instance = 0; instance < unit.quantity; instance++) {
+      const state: State = { unit, settings, order: order++, at: 0, charges: settings.ammunition,
+        magazine: Math.min(settings.magazineSize, settings.ammunition), windows };
+      state.at = nextTime(state);
+      enqueue(state);
+    }
+  }
+  let attempts = 0;
+  while (queue.length) {
+    const state = queue.shift()!;
+    const next = nextTime(state);
+    if (!Number.isFinite(next)) continue;
+    // Another instance may have removed the next target since this event was queued.
+    if (next > state.at) { state.at = next; enqueue(state); continue; }
+    const { settings, unit } = state;
+    let acted = 0;
+    for (const window of state.windows) {
+      if (acted >= settings.maxTargets || !state.magazine) break;
+      if (window.ready > state.at || window.object.neutralized) continue;
+      // ponytail: bounded synchronous game runs; move the solver to a Worker before raising this ceiling.
+      if (++attempts > 100000) throw new Error("Слишком много игровых попыток. Уменьшите запас зарядов, количество или темп атак.");
+      acted++; state.magazine--; state.charges--;
+      if (random() < 1 - getUnitKillParams(unit.assetKey ?? "").pPass) {
+        const object = window.object, s = (state.at - object.startMs) / object.durationMs;
+        object.neutralized = { by: unit.id, units: 1, atMs: state.at,
+          xM: object.start.xM + s * (object.end.xM - object.start.xM), yM: object.start.yM + s * (object.end.yM - object.start.yM) };
+      }
+    }
+    if (!state.charges) continue;
+    const reload = state.magazine === 0;
+    state.at += Math.max(settings.intervalMs, reload ? settings.reloadMs : 0);
+    if (reload) state.magazine = Math.min(settings.magazineSize, state.charges);
+    state.at = nextTime(state);
+    if (Number.isFinite(state.at)) enqueue(state);
   }
 }
 export function generateRun(config: MotionConfig, library: Library, index: number, protectionRadiusM: number = protectionRule.radiusM, defenseUnits: DefenseUnit[] = []): MotionRun {
@@ -104,9 +180,8 @@ export function generateRun(config: MotionConfig, library: Library, index: numbe
   const validation = validateLibrary({ scene: library.scene, tracks: [], exercises: [] });
   if (validation.sceneError) throw new Error("Несовместимая версия сцены.");
   if (!Number.isFinite(protectionRadiusM) || protectionRadiusM <= 0 || protectionRadiusM >= library.scene.radiusM) throw new Error("Некорректная граница условной зоны защиты.");
-  validateDefenseUnits(defenseUnits);
   const runSeed = (seed + Math.imul(index, 0x9e3779b9)) >>> 0;
-  // One draw per object in a dedicated stream: coverage config cannot shift temporal/direction randomness.
+  // Separate outcome stream: game settings never shift schedules or directions.
   const outcomeRandom = randomSource(runSeed ^ OUTCOME_STREAM_KEY);
   const random = randomSource(runSeed);
   const directionRandom = randomSource(runSeed ^ 0xa511e9b3);
@@ -120,26 +195,9 @@ export function generateRun(config: MotionConfig, library: Library, index: numbe
     const startMs = ((1 - scatter) * slot + scatter * random()) * (durationMs - duration);
     const start = point(library.scene.radiusM), end = point(protectionRadiusM);
     const object: MovingObject = { id, bearingDeg, sector: sectorAt(bearingDeg), start, end, durationMs: duration, startMs, endMs: startMs + duration };
-    let hitCount = 0;
-    let firstCovering: { by: string; s: number; xM: number; yM: number } | null = null;
-    let survivalProduct = 1;
-    const outcome = outcomeRandom();
-    for (const unit of defenseUnits) {
-      const entry = coverageEntry(unit, start, end);
-      if (!entry) continue;
-      hitCount += unit.quantity;
-      const kp = getUnitKillParams(unit.assetKey ?? "");
-      survivalProduct *= kp.pPass ** unit.quantity;
-      const xM = start.xM + entry.s * (end.xM - start.xM), yM = start.yM + entry.s * (end.yM - start.yM);
-      if (!firstCovering || entry.s < firstCovering.s) firstCovering = { by: unit.id, s: entry.s, xM, yM };
-    }
-    const neutralizedProbability = 1 - survivalProduct;
-    if (firstCovering && outcome < neutralizedProbability) {
-      object.neutralized = { by: firstCovering.by, units: hitCount,
-        atMs: startMs + firstCovering.s * duration, xM: firstCovering.xM, yM: firstCovering.yM };
-    }
     return object;
   });
+  resolveGameEffects(objects, defenseUnits, outcomeRandom);
   return { index, seed: runSeed, durationMs, objects };
 }
 export function frameAt(run: MotionRun, timeMs: number) {

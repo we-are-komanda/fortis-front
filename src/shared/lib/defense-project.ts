@@ -1,5 +1,6 @@
 import { buildDraftCostProjection, CostProjectionInputError, formatMinorRub, getAssetUnitPriceMinor } from "@/shared/lib/cost-projection";
 import { preserveDemoAssetSources } from "@/shared/lib/data-provenance";
+import { resolveGameSettings } from "@/shared/lib/game-settings";
 import { defenseAssetLibrary } from "@/shared/config/defense-asset-library";
 import { defaultDefenseProjectLayers, defaultProtectedObject } from "@/shared/config/default-defense-layers";
 import {
@@ -800,6 +801,7 @@ export function createPlacedObject(
     customPricePerUnitMln: patch.customPricePerUnitMln,
     customCoverageRadius: patch.customCoverageRadius,
     customCoverageAngle: patch.customCoverageAngle,
+    gameSettings: patch.gameSettings !== undefined ? resolveGameSettings(patch.gameSettings) : undefined,
     compoundProfile,
     hasGeometryConflict: false,
     hasCoverageConflict: false,
@@ -883,6 +885,7 @@ export function updatePlacedObjectInProject(
   objectId: string,
   patch: Partial<PlacedDefenseObject>,
 ): DefenseProject {
+  if (patch.gameSettings !== undefined) resolveGameSettings(patch.gameSettings);
   const normalizedPatch = patch.compoundProfile
     ? { ...patch, compoundProfile: normalizePlacedDefenseCompoundProfile(patch.compoundProfile) }
     : patch;
@@ -1309,6 +1312,7 @@ function normalizePersistedConflictSnapshots(object: PlacedDefenseObject): Place
   // Hydration preserves explicit true values and only backfills missing legacy fields.
   return {
     ...object,
+    ...(object.gameSettings !== undefined ? { gameSettings: resolveGameSettings(object.gameSettings) } : {}),
     hasGeometryConflict: object.hasGeometryConflict === true,
     hasCoverageConflict: object.hasCoverageConflict === true,
     hasTerrainConflict: object.hasTerrainConflict === true,
