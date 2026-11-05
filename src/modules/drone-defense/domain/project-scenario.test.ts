@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createDefaultDefenseProject } from "@/shared/lib/defense-project";
+import { createDefaultDefenseProject, duplicatePlacedObjectInProject, exportDefenseProjectJson, importDefenseProjectJson, updatePlacedObjectInProject } from "@/shared/lib/defense-project";
+import { defaultGameSettings } from "@/shared/lib/game-settings";
 import { buildProjectScenario, effectivePlacementCoverage, projectLocalPoint } from "./project-scenario";
 import { buildMapScaleBar, buildProtectedObjectWorkingViewState } from "./echelon-map-model";
 import { defaultMotionConfig, generateRun, protectionRule, summarizeRun } from "./mass-motion";
@@ -8,6 +9,25 @@ import type { Library } from "./scenario-playback";
 import libraryData from "../infra/data/scenario/library-v1.json";
 
 const library = libraryData as Library;
+test("placement game settings survive updates, duplication and JSON reload; legacy projects use defaults", () => {
+  let project = createDefaultDefenseProject();
+  project.placedObjects = [{ id: "game-unit", assetId: project.assetLibrary[0].id, layerId: project.layers[0].id,
+    coordinates: project.baseObject.center, status: "active", quantity: 2, customCoverageRadius: 3000, createdAt: "", updatedAt: "" }];
+  assert.deepEqual(buildProjectScenario(project).defenseUnits[0].gameSettings, defaultGameSettings);
+  const settings = { ...defaultGameSettings, ammunition: 0, intervalMs: 9000, maxTargets: 3 };
+  project = updatePlacedObjectInProject(project, "game-unit", { gameSettings: settings });
+  project = importDefenseProjectJson(exportDefenseProjectJson(project));
+  assert.deepEqual(buildProjectScenario(project).defenseUnits[0].gameSettings, settings);
+  assert.equal(summarizeRun(generateRun(defaultMotionConfig, library, 0, 600, buildProjectScenario(project).defenseUnits)).neutralized, 0);
+  const duplicated = duplicatePlacedObjectInProject(project, "game-unit");
+  assert.deepEqual(duplicated.placedObjects.at(-1)?.gameSettings, settings);
+  const reset = updatePlacedObjectInProject(project, "game-unit", { gameSettings: undefined });
+  assert.deepEqual(buildProjectScenario(importDefenseProjectJson(exportDefenseProjectJson(reset))).defenseUnits[0].gameSettings, defaultGameSettings);
+  assert.throws(() => updatePlacedObjectInProject(project, "game-unit", { gameSettings: { ...settings, intervalMs: 0 } }));
+  const malformed = JSON.parse(exportDefenseProjectJson(project));
+  malformed.placedObjects[0].gameSettings.ammunition = null;
+  assert.throws(() => importDefenseProjectJson(JSON.stringify(malformed)));
+});
 test("GIS working camera centers the selected object at nominal 1:100", () => {
   for (const lat of [0, 55.75, 75]) {
     const camera = buildProtectedObjectWorkingViewState({ center: {lat, lon: 37.62} } as Parameters<typeof buildProtectedObjectWorkingViewState>[0]);
@@ -78,4 +98,18 @@ test("effective coverage falls back to catalog values, manual overrides win, odd
   assert.deepEqual(effectivePlacementCoverage(placed, none), { coverageRadiusM: null, coverageAngleDeg: 360, participates: false });
   assert.deepEqual(effectivePlacementCoverage({ status: "active", customCoverageRadius: 800 } as Parameters<typeof effectivePlacementCoverage>[0], none), { coverageRadiusM: 800, coverageAngleDeg: 360, participates: true });
   assert.deepEqual(effectivePlacementCoverage({ status: "inactive", customCoverageRadius: 800 } as Parameters<typeof effectivePlacementCoverage>[0], circle), { coverageRadiusM: 800, coverageAngleDeg: 360, participates: false });
+});
+
+test("backend UUIDs and renamed assets preserve the canonical game coefficient key", () => {
+  const project = createDefaultDefenseProject();
+  const asset = project.assetLibrary[0];
+  const originalKey = asset.legacyItemId ?? asset.id;
+  asset.legacyItemId = originalKey;
+  asset.id = "76e24ede-a0d6-49fc-afae-ea30b4cfb0b3";
+  asset.name = "Игровой юнит";
+  project.placedObjects = [{ id: "instance", assetId: asset.id, layerId: project.layers[0].id,
+    coordinates: project.baseObject.center, status: "active", quantity: 1, customCoverageRadius: 2000, createdAt: "", updatedAt: "" }];
+  const scene = buildProjectScenario(project);
+  assert.equal(scene.defenseUnits[0].assetKey, originalKey);
+  assert.equal(scene.defenseUnits[0].id, "instance");
 });

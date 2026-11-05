@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import data from "../infra/data/scenario/library-v1.json";
-import { generateRun, frameAt, summarizeRun, summarizeBatch, computeBatch, type MotionConfig, type DefenseUnit, sectorAt, protectionRule } from "./mass-motion";
+import { generateRun, frameAt, summarizeRun, summarizeBatch, computeBatch, getUnitKillParams, coverageIntervals, type MotionConfig, type DefenseUnit, sectorAt, protectionRule } from "./mass-motion";
+import { defaultGameSettings } from "@/shared/lib/game-settings";
 import { factoryUnits } from "./factory-campus";
 import { initialClock, transitionClock, clockAt, formatTime, type Library } from "./scenario-playback";
 
@@ -148,14 +149,14 @@ test("sector event peaks match direct state counts", () => {
 });
 
 const originUnit = (quantity = 1): DefenseUnit => ({ id: "u1", xM: 0, yM: 0, radiusM: 1000, angleDeg: 360, rotationDeg: 0, quantity });
-test("coverage draws are deterministic, per-object and independent of coverage config", () => {
+test("game runs are deterministic and route randomness is independent of game settings", () => {
   assert.deepEqual(generateRun(config, library, 3, protectionRule.radiusM, [originUnit()]), generateRun(config, library, 3, protectionRule.radiusM, [originUnit()]));
   // Routes never depend on placed coverage: timings and geometry stay identical.
   const without = generateRun(config, library, 3), withUnit = generateRun(config, library, 3, protectionRule.radiusM, [originUnit()]);
   assert.deepEqual(without.objects.map(o => ({ id: o.id, bearingDeg: o.bearingDeg, sector: o.sector, start: o.start, end: o.end, startMs: o.startMs, endMs: o.endMs, durationMs: o.durationMs })),
     withUnit.objects.map(o => ({ id: o.id, bearingDeg: o.bearingDeg, sector: o.sector, start: o.start, end: o.end, startMs: o.startMs, endMs: o.endMs, durationMs: o.durationMs })));
 });
-test("neutralized objects stop at coverage entry and never reach the boundary", () => {
+test("neutralized objects stop at their actual attempt time and never reach the boundary", () => {
   const base = generateRun(config, library, 5, protectionRule.radiusM, []);
   const run = generateRun(config, library, 5, protectionRule.radiusM, [originUnit()]);
   const neutralizedObjects = run.objects.filter(object => object.neutralized !== undefined);
@@ -165,7 +166,9 @@ test("neutralized objects stop at coverage entry and never reach the boundary", 
     const fraction = object.neutralized!.atMs - object.startMs === 0 ? 0 : (object.neutralized!.atMs - object.startMs) / object.durationMs;
     assert.ok(Number.isFinite(fraction) && fraction >= 0 && fraction < 1);
     assert.ok(Math.abs(Math.hypot(object.neutralized!.xM, object.neutralized!.yM) - (10000 - fraction * (10000 - protectionRule.radiusM))) < 1e-6);
-    assert.ok(Math.abs(Math.hypot(object.neutralized!.xM, object.neutralized!.yM) - 1000) < 1e-6);
+    assert.ok(Math.hypot(object.neutralized!.xM, object.neutralized!.yM) < 1000);
+    const entryMs = object.startMs + (10000 - 1000) / (10000 - protectionRule.radiusM) * object.durationMs;
+    assert.ok(object.neutralized!.atMs >= entryMs + defaultGameSettings.reactionMs - 1e-7);
     const frame = frameAt(run, object.neutralized!.atMs);
     assert.ok(frame.intercepts.some(marker => marker.id === object.id && marker.neutralized && marker.by === "u1"));
     assert.ok(!frame.markers.some(marker => marker.id === object.id));
@@ -179,11 +182,7 @@ test("neutralized objects stop at coverage entry and never reach the boundary", 
     assert.equal(frame.waiting + frame.markers.length + frame.finished + frame.neutralized, run.objects.length);
   }
 });
-test("more covering units can only raise neutralization; sectors and quantities gate the outcome", () => {
-  const base = new Set(generateRun(config, library, 9, protectionRule.radiusM, [originUnit()]).objects.filter(object => object.neutralized !== undefined).map(object => object.id));
-  const stronger = new Set(generateRun(config, library, 9, protectionRule.radiusM, [originUnit(), { id: "u2", xM: 0, yM: 0, radiusM: 1000, angleDeg: 360, rotationDeg: 0, quantity: 3 }]).objects.filter(object => object.neutralized !== undefined).map(object => object.id));
-  assert.ok(stronger.size >= base.size && [...base].every(id => stronger.has(id)), `${base.size} -> ${stronger.size}`);
-  assert.ok(base.size > 0 && stronger.size > base.size);
+test("sector boundaries gate every actual game hit", () => {
   // Conditional zone: only objects whose approach line crosses the north-facing sector can be covered.
   const sectorUnit: DefenseUnit = { id: "s1", xM: 0, yM: 0, radiusM: 1000, angleDeg: 90, rotationDeg: 0, quantity: 1 };
   const sectorRun = generateRun(config, library, 11, protectionRule.radiusM, [sectorUnit]);
@@ -204,4 +203,84 @@ test("defense unit validation rejects broken configurations", () => {
     assert.throws(() => generateRun(config, library, 0, protectionRule.radiusM, [unit as DefenseUnit]));
   }
   assert.throws(() => generateRun(config, library, 0, protectionRule.radiusM, [originUnit(), originUnit()]));
+});
+
+test("activity summary and frame agree after early and immediate completion", () => {
+  for (const radiusM of [3000, 20000]) {
+    const run = generateRun({ ...config, count: 100, scatter: 0 }, library, 0, 600, [{ ...originUnit(100), radiusM, gameSettings: { ...defaultGameSettings, reactionMs: 0 } }]);
+    const summary = summarizeRun(run);
+    const times = [...new Set([0, run.durationMs, ...run.objects.flatMap(o => [o.startMs, o.endMs, o.neutralized!.atMs])])].sort((a, b) => a - b);
+    let area = 0, peak = 0;
+    const sectorPeaks = Array(8).fill(0);
+    times.forEach((time, index) => {
+      const frame = frameAt(run, time);
+      peak = Math.max(peak, frame.markers.length);
+      const sectors = Array(8).fill(0);
+      frame.markers.forEach(marker => sectors[marker.sector]++);
+      sectors.forEach((n, sector) => sectorPeaks[sector] = Math.max(sectorPeaks[sector], n));
+      if (index + 1 < times.length) area += frame.markers.length * (times[index + 1] - time);
+    });
+    assert.equal(summary.peak, peak);
+    assert.ok(Math.abs(summary.mean - area / run.durationMs) < 1e-10);
+    assert.deepEqual(summary.sectorPeaks, sectorPeaks);
+    summary.curve.forEach(point => assert.equal(point.active, frameAt(run, point.timeMs).markers.length));
+    if (radiusM === 20000) assert.equal(summary.peak, 0);
+  }
+});
+
+test("identical copies have independent resources whether grouped or split between placements", () => {
+  const units = [originUnit(4), { ...originUnit(3), id: "u2" }];
+  const run = generateRun(config, library, 0, 600, units);
+  assert.ok(run.objects.some(o => o.neutralized));
+  for (const object of run.objects) if (object.neutralized) assert.equal(object.neutralized.units, 1);
+  const single = generateRun(config, library, 0, 600, [originUnit(7)]);
+  assert.deepEqual(run.objects.map(o => o.neutralized?.atMs), single.objects.map(o => o.neutralized?.atMs));
+});
+
+test("sector intersection includes straight edges, the centre and starts inside the circle", () => {
+  const one = { ...config, count: 1, scatter: 0 };
+  const object = generateRun(one, library, 0, 600).objects[0];
+  const vx = object.start.xM / 10000, vy = object.start.yM / 10000;
+  // Rotate all fixtures with the seeded path: forward = towards the start, right = clockwise.
+  const unit = (forward: number, right: number, radiusM: number, angleDeg: number, rotation: number): DefenseUnit => ({
+    ...originUnit(100), xM: vx * forward + vy * right, yM: vy * forward - vx * right,
+    radiusM, angleDeg, rotationDeg: object.bearingDeg + rotation,
+  });
+  for (const [coverage, expectedRadius] of [
+    [unit(3000, 0, 1000, 90, 180), 3000], // enters at the sector vertex
+    [unit(3000, 200, 1000, 90, 270), 3200], // enters through a straight side
+    [unit(3000, 200, 1000, 90, -450), 3200], // equivalent negative rotation
+    [unit(3000, 200, 1000, 270, 180), 3200], // a reflex sector
+    [unit(11000, 200, 2000, 90, 180), 10000], // starts within the sector
+    [unit(9500, 200, 2000, 90, 270), 9700], // starts inside circle, outside sector
+  ] as const) {
+    const intervals = coverageIntervals(coverage, object.start, object.end);
+    assert.ok(intervals.length, JSON.stringify(coverage));
+    const radius = 10000 + intervals[0][0] * (600 - 10000);
+    assert.ok(Math.abs(radius - expectedRadius) < 1e-6, `${radius} vs ${expectedRadius}`);
+  }
+  assert.equal(generateRun(one, library, 0, 600, [unit(3000, 200, 1000, 90, 90)]).objects[0].neutralized, undefined);
+});
+
+test("non-finite coverage and unsafe quantities are rejected", () => {
+  for (const radiusM of [NaN, Infinity, -Infinity]) assert.throws(() => generateRun(config, library, 0, 600, [{ ...originUnit(), radiusM }]));
+  for (const quantity of [NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => generateRun(config, library, 0, 600, [{ ...originUnit(), quantity }]));
+});
+
+test("game coefficients use asset keys, never placement IDs or display names", () => {
+  assert.equal(getUnitKillParams("sst-zu-23m1").pPass, .7);
+  assert.equal(getUnitKillParams("sst-anklav").pPass, .25);
+  for (const key of ["unknown", "toString", "constructor"]) assert.equal(getUnitKillParams(key).pPass, .5);
+  const unit = { ...originUnit(), assetKey: "sst-zu-23m1" };
+  const outcomes = (units: DefenseUnit[]) => generateRun(config, library, 0, 600, units).objects.map(o => !!o.neutralized);
+  assert.deepEqual(outcomes([unit]), outcomes([{ ...unit, id: "renamed-placement" }]));
+  assert.notDeepEqual(outcomes([unit]), outcomes([{ ...unit, assetKey: "sst-anklav" }]));
+  assert.deepEqual(outcomes([originUnit()]), outcomes([{ ...originUnit(), id: "sst-anklav" }]));
+});
+
+test("batch activity and outcome statistics match the selected game run", async () => {
+  const units = [{ ...originUnit(2), assetKey: "sst-zu-23m1", radiusM: 3000 }];
+  const results = await computeBatch(config, library, 100, new AbortController().signal, () => {}, 600, units);
+  const summary = summarizeRun(generateRun(config, library, 17, 600, units));
+  assert.deepEqual({ ...results[17], curve: summary.curve, sectorCounts: summary.sectorCounts }, summary);
 });
