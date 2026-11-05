@@ -1,35 +1,23 @@
 import { DURATION_MS, validateLibrary, type Library, type Sample } from "./scenario-playback";
 import { factoryCampusSize } from "./factory-campus";
 
-export const motionVersion = "mass-motion@5";
+export const motionVersion = "mass-motion@6";
 // A schematic training boundary around the whole campus, not equipment coverage.
 export const protectionRule = { id: "training-boundary@1", radiusM: factoryCampusSize, signalDurationMs: 60000 } as const;
-// Individual kill-probability parameters per asset (see ADR-0032, E2).
-// pPass = probability the drone passes undamaged through one encounter with this asset.
-// Values are analytical assumptions derived from effective engagement zones and known system
-// characteristics (catalog: Каталог_АО_ССТ_2026-11-03.md).
-// Future: effectiveRadiusMultiplier enables height/weather/RCS multipliers (E6+).
+// Fictional game coefficients, not measured equipment capabilities (ADR-0032).
 export type UnitKillParams = Readonly<{
-  /** Probability drone survives (passes) a single engagement encounter. */
+  /** Probability a game object passes one unit's zone without an effect. */
   pPass: number;
-  /** Multiplier applied to effective radius for height / weather / RCS effects. */
-  effectiveRadiusMultiplier?: number;
 }>;
 
 /** Per-asset kill-probability table. Maps asset library key → individual parameters. */
-export const unitKillParams: Record<string, UnitKillParams> = {
-  // ЗУ-23М1: dual-barrel 23mm anti-aircraft gun; large footprint but lower precision vs small UAVs
-  "ЗУ-23М1":               { pPass: 0.70 },
-  // Анклав: short-range SAM (KZRK) with radar+IIR guidance; high single-shot effectiveness
-  "Анклав":                 { pPass: 0.25 },
-  // ЗПК-ЯкБ: Yak-B remote weapon station combo; moderate effectiveness
-  "ЗПК-ЯкБ":                { pPass: 0.35 },
-  // ТПУ-12,7мм: remote turret 12.7mm heavy machine gun; long range, better than 23mm on small targets
-  "ТПУ-12,7 мм":            { pPass: 0.40 },
-  // Бекас: scout-strike UCAV (counter-UAV role at close range)
-  "Бекас":                  { pPass: 0.20 },
-  // ЗУ-23М-1М на базе УРАЛ 4320: mobile twin-23mm; slightly better mobility => marginally better engagement
-  "ЗУ-23М-1М на базе УРАЛ 4320": { pPass: 0.65 },
+export const unitKillParams: Readonly<Record<string, UnitKillParams>> = {
+  "sst-zu-23m1": { pPass: 0.70 },
+  "sst-anklav": { pPass: 0.25 },
+  "sst-zpk-yakb": { pPass: 0.35 },
+  "sst-tpu-12-7": { pPass: 0.40 },
+  "sst-bekas": { pPass: 0.20 },
+  "sst-zu-23m-1m-ural": { pPass: 0.65 },
 };
 
 // Fallback value for unknown assets (backwards-compatible default from original model).
@@ -37,14 +25,14 @@ const EFFECTIVE_PASS_FALLBACK = 0.5;
 
 /** Look up kill parameters for a given asset key; falls back to generic default. */
 export function getUnitKillParams(assetKey: string): UnitKillParams {
-  return unitKillParams[assetKey] ?? { pPass: EFFECTIVE_PASS_FALLBACK };
+  return Object.hasOwn(unitKillParams, assetKey) ? unitKillParams[assetKey] : { pPass: EFFECTIVE_PASS_FALLBACK };
 }
 
 // Conditional equipment outcome model: coverage geometry + one seeded draw per object.
 // Each unit now uses its own unitKillParams.pPass instead of a flat unitProbability.
-export const effectModel = { id: "coverage-neutralization@2" } as const;
+export const effectModel = { id: "coverage-neutralization@3" } as const;
 // A placed asset instance as used by modeling: local meters, effective conditional TTХ.
-export type DefenseUnit = { id: string; xM: number; yM: number; radiusM: number; angleDeg: number; rotationDeg: number; quantity: number };
+export type DefenseUnit = { id: string; assetKey?: string; xM: number; yM: number; radiusM: number; angleDeg: number; rotationDeg: number; quantity: number };
 export type MotionConfig = { durationMs: number; count: number; seed: number; scatter: number };
 type Point = Pick<Sample, "xM" | "yM" | "zM">;
 export const sectorLabels = ["С", "СВ", "В", "ЮВ", "Ю", "ЮЗ", "З", "СЗ"];
@@ -70,29 +58,33 @@ function randomSource(seed: number) {
 const OUTCOME_STREAM_KEY = 0x51ed270b;
 // rotationDeg and bearing use the map convention: 0° = north, increasing clockwise.
 const sectorCovers = (bearingDeg: number, rotationDeg: number, angleDeg: number) =>
-  angleDeg >= 360 || Math.abs(((bearingDeg - rotationDeg + 540) % 360) - 180) <= angleDeg / 2;
-// First intersection of the radial path (start→end) with the unit coverage circle, as path parameter s∈[0,1].
+  angleDeg >= 360 || Math.abs((((bearingDeg - rotationDeg) % 360 + 540) % 360) - 180) <= angleDeg / 2 + 1e-9;
+// The first point in a closed sector is a start/end point, a circle root or a radial-edge crossing.
 function coverageEntry(unit: DefenseUnit, start: Point, end: Point): { s: number; bearingDeg: number } | null {
   const dx = end.xM - start.xM, dy = end.yM - start.yM;
   const lengthSq = dx * dx + dy * dy;
   if (!Number.isFinite(lengthSq) || lengthSq <= 0) return null;
   const ox = start.xM - unit.xM, oy = start.yM - unit.yM;
   const a = lengthSq, b = 2 * (ox * dx + oy * dy), c = ox * ox + oy * oy - unit.radiusM * unit.radiusM;
-  let s: number;
-  if (c <= 0) s = 0;
-  else {
-    const discriminant = b * b - 4 * a * c;
-    if (discriminant < 0) return null;
+  const candidates = [0, 1];
+  const discriminant = b * b - 4 * a * c;
+  if (discriminant >= 0) {
     const root = Math.sqrt(discriminant);
-    s = (-b - root) / (2 * a);
-    if (s < 0 || s > 1) s = (-b + root) / (2 * a);
-    if (s < 0 || s > 1) return null;
+    candidates.push((-b - root) / (2 * a), (-b + root) / (2 * a));
   }
-  const sClamped = Math.min(1, Math.max(0, s));
-  const px = start.xM + sClamped * dx, py = start.yM + sClamped * dy;
-  const bearing = (Math.atan2(px - unit.xM, py - unit.yM) * 180 / Math.PI + 360) % 360;
-  if (!sectorCovers(bearing, unit.rotationDeg, unit.angleDeg)) return null;
-  return { s: Number.isFinite(s) ? s : sClamped, bearingDeg: bearing };
+  if (unit.angleDeg < 360) for (const side of [-1, 1]) {
+    const angle = ((unit.rotationDeg % 360) + side * unit.angleDeg / 2) * Math.PI / 180;
+    const rx = Math.sin(angle), ry = Math.cos(angle);
+    const cross = dx * ry - dy * rx;
+    if (Math.abs(cross) > 1e-9) candidates.push((oy * rx - ox * ry) / cross);
+  }
+  for (const s of candidates.filter(s => s >= 0 && s <= 1).sort((a, b) => a - b)) {
+    const x = ox + s * dx, y = oy + s * dy;
+    const distance = Math.hypot(x, y);
+    const bearingDeg = (Math.atan2(x, y) * 180 / Math.PI + 360) % 360;
+    if (distance <= unit.radiusM + 1e-7 && (distance <= 1e-7 || sectorCovers(bearingDeg, unit.rotationDeg, unit.angleDeg))) return { s, bearingDeg };
+  }
+  return null;
 }
 function validateDefenseUnits(units: DefenseUnit[]) {
   if (!Array.isArray(units)) throw new Error("Некорректная конфигурация средств.");
@@ -100,8 +92,8 @@ function validateDefenseUnits(units: DefenseUnit[]) {
   for (const unit of units) {
     if (!unit || typeof unit.id !== "string" || !unit.id || ids.has(unit.id)) throw new Error("Некорректная конфигурация средств.");
     ids.add(unit.id);
-    if (![unit.xM, unit.yM, unit.rotationDeg].every(Number.isFinite) || unit.radiusM <= 0 || !(unit.angleDeg > 0) || unit.angleDeg > 360 ||
-      !Number.isInteger(unit.quantity) || unit.quantity < 1) throw new Error("Некорректная конфигурация средств.");
+    if (![unit.xM, unit.yM, unit.rotationDeg, unit.radiusM, unit.angleDeg].every(Number.isFinite) || unit.radiusM <= 0 || !(unit.angleDeg > 0) || unit.angleDeg > 360 ||
+      !Number.isSafeInteger(unit.quantity) || unit.quantity < 1 || (unit.assetKey !== undefined && typeof unit.assetKey !== "string")) throw new Error("Некорректная конфигурация средств.");
   }
 }
 export function generateRun(config: MotionConfig, library: Library, index: number, protectionRadiusM: number = protectionRule.radiusM, defenseUnits: DefenseUnit[] = []): MotionRun {
@@ -130,45 +122,17 @@ export function generateRun(config: MotionConfig, library: Library, index: numbe
     const object: MovingObject = { id, bearingDeg, sector: sectorAt(bearingDeg), start, end, durationMs: duration, startMs, endMs: startMs + duration };
     let hitCount = 0;
     let firstCovering: { by: string; s: number; xM: number; yM: number } | null = null;
-    // Collect one pPass draw per unit instance across all covering zones.
-    const survivors: number[] = [];
+    let survivalProduct = 1;
     const outcome = outcomeRandom();
-    // Union-of-circles: collect (s, unitId) pairs, sort by s, merge overlapping
-    // intervals by proximity along trajectory, count distinct units in each group.
-    const EPSILON_S = 1e-6;
-    type _Entry = { s: number; id: string };
-    const entries: _Entry[] = [];
     for (const unit of defenseUnits) {
       const entry = coverageEntry(unit, start, end);
       if (!entry) continue;
-      entries.push({ s: entry.s, id: unit.id });
       hitCount += unit.quantity;
-      const kp = getUnitKillParams(unit.id);
-      for (let i = 0; i < unit.quantity; i++) {
-        survivors.push(kp.pPass);
-      }
+      const kp = getUnitKillParams(unit.assetKey ?? "");
+      survivalProduct *= kp.pPass ** unit.quantity;
       const xM = start.xM + entry.s * (end.xM - start.xM), yM = start.yM + entry.s * (end.yM - start.yM);
       if (!firstCovering || entry.s < firstCovering.s) firstCovering = { by: unit.id, s: entry.s, xM, yM };
     }
-    // Deduplicate hitCount by merging overlapping intervals along trajectory parameter s.
-    if (entries.length > 0) {
-      entries.sort((a, b) => a.s - b.s);
-      const groups: _Entry[][] = [[entries[0]]];
-      for (let i = 1; i < entries.length; i++) {
-        const prev = groups[groups.length - 1];
-        const lastS = prev[prev.length - 1].s;
-        if (Math.abs(entries[i].s - lastS) <= EPSILON_S) {
-          prev.push(entries[i]);
-        } else {
-          groups.push([entries[i]]);
-        }
-      }
-      hitCount = 0;
-      for (const group of groups) {
-        hitCount += new Set(group.map(e => e.id)).size;
-      }
-    }
-    const survivalProduct = survivors.reduce((acc, p) => acc * p, 1);
     const neutralizedProbability = 1 - survivalProduct;
     if (firstCovering && outcome < neutralizedProbability) {
       object.neutralized = { by: firstCovering.by, units: hitCount,
@@ -209,7 +173,7 @@ export function frameAt(run: MotionRun, timeMs: number) {
   return { waiting, finished, neutralized, markers, signals, intercepts, events };
 }
 export function summarizeRun(run: MotionRun) {
-  const events = run.objects.flatMap(object => [{ timeMs: object.startMs, delta: 1, sector: object.sector }, { timeMs: object.endMs, delta: -1, sector: object.sector }])
+  const events = run.objects.flatMap(object => [{ timeMs: object.startMs, delta: 1, sector: object.sector }, { timeMs: object.neutralized?.atMs ?? object.endMs, delta: -1, sector: object.sector }])
     .sort((a, b) => a.timeMs - b.timeMs || a.delta - b.delta);
   let active = 0, peak = 0;
   const sectorActive = Array<number>(8).fill(0), sectorPeaks = Array<number>(8).fill(0), sectorCounts = Array<number>(8).fill(0);
@@ -227,7 +191,7 @@ export function summarizeRun(run: MotionRun) {
   const neutralized = run.objects.filter(object => object.neutralized !== undefined).length;
   const sectorNeutralized = Array<number>(8).fill(0);
   run.objects.forEach(object => { if (object.neutralized) sectorNeutralized[object.sector]++; });
-  return { index: run.index, seed: run.seed, peak, mean: run.objects.reduce((sum, o) => sum + o.durationMs, 0) / run.durationMs, sectorPeaks, sectorCounts, neutralized,
+  return { index: run.index, seed: run.seed, peak, mean: run.objects.reduce((sum, o) => sum + (o.neutralized?.atMs ?? o.endMs) - o.startMs, 0) / run.durationMs, sectorPeaks, sectorCounts, neutralized,
     neutralizedRate: run.objects.length ? neutralized / run.objects.length : 0, sectorNeutralized, curve };
 }
 export function summarizeBatch(results: Pick<RunSummary, "peak" | "mean" | "sectorPeaks" | "neutralizedRate">[]) {

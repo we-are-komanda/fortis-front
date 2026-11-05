@@ -30,14 +30,14 @@ export function buildProjectScenario(project: DefenseProject) {
     const asset = assets.get(object.assetId);
     const color = layers.get(object.layerId)?.color;
     const coverage = effectivePlacementCoverage(object, asset);
-    return { id: object.id, assetId: object.assetId, name: object.name || asset?.name || object.assetId,
+    return { id: object.id, assetId: object.assetId, assetKey: asset?.legacyItemId ?? asset?.id ?? object.assetId, name: object.name || asset?.name || object.assetId,
       symbolId: getDefenseAssetSymbolId(asset?.legacyItemId ?? asset?.id ?? object.assetId),
       quantity: object.quantity, status: object.status, rotation: object.rotation ?? 0,
       color: color && /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#2563eb",
       ...coverage, ...projectLocalPoint(center, object.coordinates) };
   });
   const defenseUnits = placements.flatMap(placement =>
-    placement.participates && placement.coverageRadiusM ? [{ id: placement.id, xM: placement.xM, yM: placement.yM,
+    placement.participates && placement.coverageRadiusM ? [{ id: placement.id, assetKey: placement.assetKey, xM: placement.xM, yM: placement.yM,
       radiusM: placement.coverageRadiusM, angleDeg: placement.coverageAngleDeg, rotationDeg: placement.rotation, quantity: placement.quantity }] : []);
   const protectionRadiusM = Math.ceil((Math.max(...perimeter.map(point => Math.hypot(point.xM, point.yM))) + 50) / 50) * 50;
   const extentM = Math.max(650, ...placements.map(point => Math.max(Math.abs(point.xM), Math.abs(point.yM))));

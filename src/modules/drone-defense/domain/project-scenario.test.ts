@@ -79,3 +79,17 @@ test("effective coverage falls back to catalog values, manual overrides win, odd
   assert.deepEqual(effectivePlacementCoverage({ status: "active", customCoverageRadius: 800 } as Parameters<typeof effectivePlacementCoverage>[0], none), { coverageRadiusM: 800, coverageAngleDeg: 360, participates: true });
   assert.deepEqual(effectivePlacementCoverage({ status: "inactive", customCoverageRadius: 800 } as Parameters<typeof effectivePlacementCoverage>[0], circle), { coverageRadiusM: 800, coverageAngleDeg: 360, participates: false });
 });
+
+test("backend UUIDs and renamed assets preserve the canonical game coefficient key", () => {
+  const project = createDefaultDefenseProject();
+  const asset = project.assetLibrary[0];
+  const originalKey = asset.legacyItemId ?? asset.id;
+  asset.legacyItemId = originalKey;
+  asset.id = "76e24ede-a0d6-49fc-afae-ea30b4cfb0b3";
+  asset.name = "Игровой юнит";
+  project.placedObjects = [{ id: "instance", assetId: asset.id, layerId: project.layers[0].id,
+    coordinates: project.baseObject.center, status: "active", quantity: 1, customCoverageRadius: 2000, createdAt: "", updatedAt: "" }];
+  const scene = buildProjectScenario(project);
+  assert.equal(scene.defenseUnits[0].assetKey, originalKey);
+  assert.equal(scene.defenseUnits[0].id, "instance");
+});

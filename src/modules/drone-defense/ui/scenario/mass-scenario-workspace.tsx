@@ -8,7 +8,7 @@ import { useTheme } from "next-themes";
 import { Button, Modal, Typography, theme } from "antd";
 import libraryData from "../../infra/data/scenario/library-v1.json";
 import { clockAt, formatTime, initialClock, transitionClock, type Clock, type ClockAction, type Library, type Track } from "../../domain/scenario-playback";
-import { computeBatch, defaultMotionConfig, effectModel, frameAt, generateRun, motionVersion, protectionRule, summarizeBatch, summarizeRun, sectorLabels, sectorColors, type MotionConfig, type RunSummary } from "../../domain/mass-motion";
+import { computeBatch, defaultMotionConfig, effectModel, frameAt, generateRun, getUnitKillParams, motionVersion, protectionRule, summarizeBatch, summarizeRun, sectorLabels, sectorColors, type MotionConfig, type RunSummary } from "../../domain/mass-motion";
 import { factoryCampusZoom } from "../../domain/factory-campus";
 import { workingZoom, type ScenarioLayers } from "../../domain/scenario-site";
 import { ScenarioMap2D } from "./scenario-map-2d";
@@ -78,12 +78,23 @@ export default function MassScenarioWorkspace({ project }: { project?: DefensePr
   const [objectId, setObjectId] = useState("");
   const [layers, setLayers] = useState<ScenarioLayers>({ terrain: true, enterprise: true, tracks: true, radius: true });
   const defenseUnits = useMemo(() => projectScene?.defenseUnits ?? [], [projectScene]);
+  // Selection, labels and camera do not change the calculation inputs.
+  const defenseKey = JSON.stringify([protectionRadiusM, defenseUnits]);
+  const [previousDefenseKey, setPreviousDefenseKey] = useState(defenseKey);
+  if (previousDefenseKey !== defenseKey) {
+    setPreviousDefenseKey(defenseKey);
+    setResults(null);
+    setProgress(null);
+    setRunIndex(0);
+    setClock({ ...initialClock, rate: clock.rate });
+    setNotice("");
+  }
   const run = useMemo(() => generateRun(config, library, runIndex, protectionRadiusM, defenseUnits), [config, runIndex, protectionRadiusM, defenseUnits]);
   const summary = useMemo(() => summarizeRun(run), [run]);
   const aggregate = useMemo(() => results ? summarizeBatch(results) : null, [results]);
   const frame = useMemo(() => frameAt(run, clock.timeMs), [run, clock.timeMs]);
   const displayMarkers = useMemo(() => [...frame.markers, ...frame.signals, ...frame.intercepts], [frame]);
-  const nextEventMs = Math.min(...run.objects.filter(object => object.endMs > clock.timeMs).map(object => object.endMs));
+  const nextEventMs = Math.min(...run.objects.filter(object => !object.neutralized && object.endMs > clock.timeMs).map(object => object.endMs));
   const playing = clock.status === "playing";
   const validSeed = /^\d+$/.test(seedText) && Number(seedText) <= 0xffffffff;
   const time = (value: number) => formatTime(value, config.durationMs);
@@ -120,7 +131,7 @@ export default function MassScenarioWorkspace({ project }: { project?: DefensePr
     document.addEventListener("visibilitychange", pause);
     return () => document.removeEventListener("visibilitychange", pause);
   }, [act]);
-  useEffect(() => () => batch.current?.abort(), []);
+  useEffect(() => () => batch.current?.abort(), [defenseKey]);
   const cancel = () => { batch.current?.abort(); batch.current = null; setProgress(null); };
   const change = (patch: Partial<MotionConfig>) => {
     cancel(); setResults(null); setRunIndex(0); setNotice("");
@@ -232,8 +243,8 @@ export default function MassScenarioWorkspace({ project }: { project?: DefensePr
       </section>
       {projectScene && <section aria-label="Конфигурация с карты">
         <Typography.Title level={5}>{projectScene.name}</Typography.Title>
-        <Typography.Paragraph>Объект и средства используют общее состояние с картой. Для любого выбранного объекта используется стандартная BIM-модель предприятия; контур объекта условный. Модель эффективности — условная ({effectModel.id}): объект, вошедший в условную зону действующего средства, нейтрализован с вероятностью {(effectModel.unitProbability * 100).toFixed(0)}% на одно учитываемое изделие (несколько изделий объединяются: 1−{(effectModel.unitProbability).toFixed(2).slice(1)}^k). Дальности и углы зон — оценки пользователя или значения каталога; это учебные допущения, не подтверждённая эффективность реальных средств.</Typography.Paragraph>
-        <ul>{projectScene.placements.map(object => <li key={object.id}>{object.name} · {object.quantity} шт. · {statusLabels[object.status]} · {object.participates ? `учитывается: ${object.coverageRadiusM} м / ${object.coverageAngleDeg}°` : "не участвует"}</li>)}</ul>
+        <Typography.Paragraph>Объект и средства используют общее состояние с картой. Для любого выбранного объекта используется стандартная BIM-модель предприятия; контур объекта условный. Игровая модель ({effectModel.id}): вероятность пройти все пересечённые зоны равна произведению вероятностей прохода каждого изделия с учётом количества. Вероятность условной нейтрализации — 1 минус это произведение. Каждое изделие учитывается один раз, в том числе при перекрытии зон. Результат одного розыгрыша показывается в первой пересечённой зоне. Коэффициенты — настройки игры, не подтверждённая эффективность реальных средств; дальности и углы — условные параметры.</Typography.Paragraph>
+        <ul>{projectScene.placements.map(object => <li key={object.id}>{object.name} · {object.quantity} шт. · {statusLabels[object.status]} · {object.participates ? `учитывается: ${object.coverageRadiusM} м / ${object.coverageAngleDeg}°; игровая вероятность прохода одного изделия ${(getUnitKillParams(object.assetKey).pPass * 100).toFixed(0)}%` : "не участвует"}</li>)}</ul>
       </section>}
       <Typography.Title level={5}>Данные прогона</Typography.Title>
       <Typography.Paragraph type="secondary">Прогон №{runIndex + 1} · seed {run.seed} · {motionVersion} · сессия сбрасывается при выходе или перезагрузке</Typography.Paragraph>
